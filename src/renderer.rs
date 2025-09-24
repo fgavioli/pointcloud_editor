@@ -62,29 +62,42 @@ impl Camera {
 pub struct CameraController {
     pub speed: f32,
     pub sensitivity: f32,
-    pub is_forward_pressed: bool,
-    pub is_backward_pressed: bool,
+    pub zoom_speed: f32,
     pub is_left_pressed: bool,
     pub is_right_pressed: bool,
-    pub is_up_pressed: bool,
-    pub is_down_pressed: bool,
-    pub is_mouse_pressed: bool,
+    pub is_up_pressed: bool,        // W key for zoom in
+    pub is_down_pressed: bool,      // S key for zoom out
+    pub is_pan_up_pressed: bool,    // Q key for pan up
+    pub is_pan_down_pressed: bool,  // E key for pan down
+    pub is_mouse_pressed: bool,     // Left mouse button for orbiting
+    pub is_right_mouse_pressed: bool, // Right mouse button for zooming
     pub last_mouse_pos: glam::Vec2,
+    // Orbit mode parameters
+    pub distance: f32,
+    pub theta: f32, // Horizontal angle (azimuth)
+    pub phi: f32,   // Vertical angle (elevation)
+    pub target: glam::Vec3, // Center point to orbit around
 }
 
 impl CameraController {
-    pub fn new(speed: f32) -> Self {
+    pub fn new(speed: f32, target: glam::Vec3, initial_distance: f32) -> Self {
         Self {
             speed,
             sensitivity: 0.005,
-            is_forward_pressed: false,
-            is_backward_pressed: false,
+            zoom_speed: 0.1,
             is_left_pressed: false,
             is_right_pressed: false,
             is_up_pressed: false,
             is_down_pressed: false,
+            is_pan_up_pressed: false,
+            is_pan_down_pressed: false,
             is_mouse_pressed: false,
+            is_right_mouse_pressed: false,
             last_mouse_pos: glam::Vec2::ZERO,
+            distance: initial_distance,
+            theta: 0.0_f32.to_radians(),   // Start aligned with Y-axis
+            phi: -89.0_f32.to_radians(),   // Start looking down at 89 degrees from top
+            target,
         }
     }
 
@@ -102,19 +115,19 @@ impl CameraController {
                 let is_pressed = *state == ElementState::Pressed;
                 match key {
                     Key::Named(NamedKey::ArrowUp) => {
-                        self.is_forward_pressed = is_pressed;
+                        self.is_up_pressed = is_pressed;
                         true
                     }
                     Key::Character(s) if s == "w" => {
-                        self.is_forward_pressed = is_pressed;
+                        self.is_up_pressed = is_pressed;
                         true
                     }
                     Key::Named(NamedKey::ArrowDown) => {
-                        self.is_backward_pressed = is_pressed;
+                        self.is_down_pressed = is_pressed;
                         true
                     }
                     Key::Character(s) if s == "s" => {
-                        self.is_backward_pressed = is_pressed;
+                        self.is_down_pressed = is_pressed;
                         true
                     }
                     Key::Named(NamedKey::ArrowLeft) => {
@@ -134,11 +147,11 @@ impl CameraController {
                         true
                     }
                     Key::Character(s) if s == "q" => {
-                        self.is_up_pressed = is_pressed;
+                        self.is_pan_up_pressed = is_pressed;
                         true
                     }
                     Key::Character(s) if s == "e" => {
-                        self.is_down_pressed = is_pressed;
+                        self.is_pan_down_pressed = is_pressed;
                         true
                     }
                     _ => false,
@@ -152,17 +165,55 @@ impl CameraController {
                 self.is_mouse_pressed = *state == ElementState::Pressed;
                 true
             }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Right,
+                ..
+            } => {
+                self.is_right_mouse_pressed = *state == ElementState::Pressed;
+                true
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 let new_pos = glam::Vec2::new(position.x as f32, position.y as f32);
                 if self.is_mouse_pressed {
-                    let _delta = new_pos - self.last_mouse_pos; // Keep for future use
+                    let delta = new_pos - self.last_mouse_pos;
+                    // Orbit camera based on mouse movement
+                    self.theta -= delta.x * self.sensitivity; // Horizontal rotation (yaw) - reversed for natural feel
+                    self.phi -= delta.y * self.sensitivity;   // Vertical rotation (pitch)
+
+                    // Clamp phi to prevent flipping (pitch should be between -90 and +90 degrees)
+                    self.phi = self.phi.clamp(-std::f32::consts::FRAC_PI_2 + 0.1, std::f32::consts::FRAC_PI_2 - 0.1);
+
                     self.last_mouse_pos = new_pos;
-                    // We'll handle the delta in update_camera
+                    true
+                } else if self.is_right_mouse_pressed {
+                    let delta = new_pos - self.last_mouse_pos;
+                    // Zoom camera based on vertical mouse movement (ignore horizontal)
+                    // Make zoom speed proportional to current distance for natural feel
+                    let zoom_amount = -delta.y * self.sensitivity * self.distance * 0.5;
+                    self.distance += zoom_amount;
+                    // Prevent zooming too close
+                    self.distance = self.distance.clamp(0.1, f32::MAX);
+
+                    self.last_mouse_pos = new_pos;
                     true
                 } else {
                     self.last_mouse_pos = new_pos;
                     false
                 }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                // Handle zoom with mouse wheel - make proportional to distance
+                let base_zoom = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => -y * self.zoom_speed,
+                    MouseScrollDelta::PixelDelta(pos) => -pos.y as f32 * 0.01 * self.zoom_speed,
+                };
+                // Make zoom proportional to current distance for natural feel
+                let zoom_amount = base_zoom * self.distance;
+                self.distance += zoom_amount;
+                // Prevent zooming too close
+                self.distance = self.distance.clamp(0.1, f32::MAX);
+                true
             }
             _ => false,
         }
@@ -171,34 +222,59 @@ impl CameraController {
     pub fn update_camera(&mut self, camera: &mut Camera, dt: std::time::Duration) {
         let dt = dt.as_secs_f32();
 
-        // Handle keyboard movement - pan camera and target together
-        let forward = (camera.target - camera.eye).normalize();
-        let right = forward.cross(camera.up).normalize();
-        let up = camera.up;
-
-        let mut movement = glam::Vec3::ZERO;
-        if self.is_forward_pressed {
-            movement += forward;
-        }
-        if self.is_backward_pressed {
-            movement -= forward;
-        }
-        if self.is_right_pressed {
-            movement += right;
-        }
-        if self.is_left_pressed {
-            movement -= right;
-        }
+        // Handle zoom with W/S keys
         if self.is_up_pressed {
-            movement += up;
+            self.distance -= self.zoom_speed * dt * 10.0; // Zoom in
         }
         if self.is_down_pressed {
-            movement -= up;
+            self.distance += self.zoom_speed * dt * 10.0; // Zoom out
+        }
+        // Clamp distance to prevent zooming too close
+        self.distance = self.distance.clamp(0.1, f32::MAX);
+
+        // Handle keyboard movement - move the orbit target for panning
+        let forward = glam::Vec3::new(
+            self.theta.cos() * self.phi.cos(),
+            self.theta.sin() * self.phi.cos(),
+            self.phi.sin(),
+        ).normalize();
+        let right = forward.cross(glam::Vec3::Z).normalize();
+        let up = glam::Vec3::Z;
+
+        let mut target_movement = glam::Vec3::ZERO;
+        if self.is_right_pressed {
+            target_movement -= right;
+        }
+        if self.is_left_pressed {
+            target_movement += right;
+        }
+        if self.is_pan_up_pressed {
+            target_movement += up;
+        }
+        if self.is_pan_down_pressed {
+            target_movement -= up;
         }
 
-        movement *= self.speed * dt;
-        camera.eye += movement;
-        camera.target += movement;
+        target_movement *= self.speed * dt;
+        self.target += target_movement;
+
+        // Calculate camera position using proper yaw/pitch rotations for Z-up system
+        // Start with a base forward vector pointing along -Y axis (since Z is up)
+        let base_forward = glam::Vec3::new(0.0, -1.0, 0.0);
+        
+        // Apply yaw rotation (around world Z-axis - the up axis)
+        let yaw_rotation = glam::Mat3::from_rotation_z(self.theta);
+        let yawed_forward = yaw_rotation * base_forward;
+        
+        // Apply pitch rotation (around the local X-axis after yaw)
+        let right_vector = yawed_forward.cross(glam::Vec3::Z).normalize();
+        let pitch_rotation = glam::Mat3::from_axis_angle(right_vector, self.phi);
+        let final_forward = pitch_rotation * yawed_forward;
+        
+        // Position camera at distance from target in the opposite direction
+        camera.eye = self.target - final_forward * self.distance;
+        camera.target = self.target;
+        camera.up = glam::Vec3::Z;
     }
 }
 
@@ -274,26 +350,38 @@ impl Renderer {
 
         surface.configure(&device, &config);
 
-        // Create camera - since we normalize the point cloud to fit in a 2x2x2 cube centered at origin
-        // we can set up the camera to view this normalized space
-        let center = glam::Vec3::ZERO; // Point cloud is centered at origin after normalization
-        let normalized_extent = 2.0; // Points are scaled to fit in [-1, 1] range
+        // center camera target to z = 0 and x,y to pointcloud center
+        let target = glam::Vec3::new(
+            (pointcloud.max_coord[0] + pointcloud.min_coord[0]) / 2.0,
+            (pointcloud.max_coord[1] + pointcloud.min_coord[1]) / 2.0,
+            0.0,
+        );
+        
+        // Calculate actual point cloud extent for camera positioning
+        let extent_x = pointcloud.max_coord[0] - pointcloud.min_coord[0];
+        let extent_y = pointcloud.max_coord[1] - pointcloud.min_coord[1];
+        let extent_z = pointcloud.max_coord[2] - pointcloud.min_coord[2];
+        let max_extent = extent_x.max(extent_y).max(extent_z);
 
-        // Position camera to get a good view of the normalized point cloud
-        let camera_distance = normalized_extent * 2.5; // Move camera back to see the whole cloud
-        let camera_height = normalized_extent * 0.5; // Slightly above for a better angle
+        // Position camera above the point cloud, centered on X-Y plane
+        let camera_distance = max_extent * 2.5; // Distance from target
+        let camera_z_top = pointcloud.max_coord[2] + max_extent * 0.5; // Above the top of the point cloud
 
         let camera = Camera {
-            eye: glam::Vec3::new(camera_distance, camera_height, camera_distance),
-            target: center,
-            up: glam::Vec3::Y,
+            eye: glam::Vec3::new(0.0, 0.0, camera_z_top), // Centered on X-Y, top of Z
+            target: target,
+            up: glam::Vec3::Z,  // Z is up in this coordinate system
             aspect: config.width as f32 / config.height as f32,
             fovy: 60.0_f32.to_radians(), // Wider field of view for better visibility
             znear: 0.1,
-            zfar: normalized_extent * 20.0,
+            zfar: max_extent * 20.0,
         };
 
-        let camera_controller = CameraController::new(normalized_extent * 0.5);
+        let camera_controller = CameraController::new(
+            max_extent * 0.1,
+            target,
+            camera_distance  // Use the distance for proper orbit calculations
+        );
 
         let mut camera_uniform = CameraUniform {
             view_proj: [[0.0; 4]; 4],
@@ -432,29 +520,12 @@ impl Renderer {
     fn create_vertices_from_pointcloud(pointcloud: &PointCloud) -> Vec<Vertex> {
         let mut vertices = Vec::new();
 
-        // Normalize coordinates to fit in the view
-        let center = [
-            (pointcloud.min_coord[0] + pointcloud.max_coord[0]) * 0.5,
-            (pointcloud.min_coord[1] + pointcloud.max_coord[1]) * 0.5,
-            (pointcloud.min_coord[2] + pointcloud.max_coord[2]) * 0.5,
-        ];
-        let extent = [
-            pointcloud.max_coord[0] - pointcloud.min_coord[0],
-            pointcloud.max_coord[1] - pointcloud.min_coord[1],
-            pointcloud.max_coord[2] - pointcloud.min_coord[2],
-        ];
-        let max_extent = extent[0].max(extent[1].max(extent[2]));
-        let scale = if max_extent > 0.0 {
-            2.0 / max_extent
-        } else {
-            1.0
-        };
-
+        // Use original coordinates without scaling
         for i in 0..pointcloud.x.len() {
             let position = [
-                (pointcloud.x[i] - center[0]) * scale,
-                (pointcloud.y[i] - center[1]) * scale,
-                (pointcloud.z[i] - center[2]) * scale,
+                pointcloud.x[i],
+                pointcloud.y[i],
+                pointcloud.z[i],
             ];
             // Create rainbow color based on intensity (already normalized to 0-255)
             let color = Self::intensity_to_rainbow_color(
