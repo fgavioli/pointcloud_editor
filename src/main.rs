@@ -1,7 +1,5 @@
-use half::f16;
-use pcd_rs::{DynReader, DynRecord};
-use std::{env, process::exit, sync::Arc};
-use threecrate_io::RobustPcdReader;
+use pcd_rs::DynReader;
+use std::{env, sync::Arc};
 use winit::{
     application::ApplicationHandler,
     event::*,
@@ -87,152 +85,14 @@ impl ApplicationHandler for App {
 
 struct PointCloud {
     // Structure of Arrays (SoA) for better memory efficiency
-    x: Vec<f16>,
-    y: Vec<f16>,
-    z: Vec<f16>,
+    x: Vec<f32>,
+    y: Vec<f32>,
+    z: Vec<f32>,
     intensity: Vec<u8>,
-    min_coord: glam::Vec3,
-    max_coord: glam::Vec3,
+    min_coord: [f32; 3],
+    max_coord: [f32; 3],
     min_intensity: u8,
     max_intensity: u8,
-}
-
-fn parse_pcd(
-    mut pcd_data: (threecrate_io::PcdHeader, Vec<threecrate_io::pcd::PcdPoint>),
-) -> PointCloud {
-    let has_intensity = pcd_data
-        .0
-        .fields
-        .iter()
-        .any(|f| f.name.to_lowercase() == "intensity");
-
-    // Pre-allocate vectors for Structure of Arrays
-    let num_points = pcd_data.1.len();
-    let mut x_coords = Vec::with_capacity(num_points);
-    let mut y_coords = Vec::with_capacity(num_points);
-    let mut z_coords = Vec::with_capacity(num_points);
-    let mut intensities = Vec::with_capacity(num_points);
-
-    // Temporary vectors to calculate bounds
-    let mut x_f32 = Vec::with_capacity(num_points);
-    let mut y_f32 = Vec::with_capacity(num_points);
-    let mut z_f32 = Vec::with_capacity(num_points);
-    let mut intensity_f32 = Vec::with_capacity(num_points);
-
-    // Parse and collect data, consuming the original data
-    for point in pcd_data.1.drain(..) {
-        let x = match &point.get("x").unwrap()[0] {
-            threecrate_io::PcdValue::F32(val) => *val,
-            _ => panic!("Expected Float32 for x coordinate"),
-        };
-        let y = match &point.get("y").unwrap()[0] {
-            threecrate_io::PcdValue::F32(val) => *val,
-            _ => panic!("Expected Float32 for y coordinate"),
-        };
-        let z = match &point.get("z").unwrap()[0] {
-            threecrate_io::PcdValue::F32(val) => *val,
-            _ => panic!("Expected Float32 for z coordinate"),
-        };
-        let intensity = if has_intensity {
-            match &point.get("intensity").unwrap()[0] {
-                threecrate_io::PcdValue::F32(val) => *val,
-                _ => panic!("Expected Float32 for intensity"),
-            }
-        } else {
-            0.0
-        };
-
-        x_f32.push(x);
-        y_f32.push(y);
-        z_f32.push(z);
-        intensity_f32.push(intensity);
-    }
-
-    // Calculate bounds from f32 data
-    let min_x = x_f32.iter().fold(f32::INFINITY, |a, &b| a.min(b));
-    let max_x = x_f32.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-    let min_y = y_f32.iter().fold(f32::INFINITY, |a, &b| a.min(b));
-    let max_y = y_f32.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-    let min_z = z_f32.iter().fold(f32::INFINITY, |a, &b| a.min(b));
-    let max_z = z_f32.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-
-    let min_intensity_f32 = intensity_f32.iter().fold(f32::INFINITY, |a, &b| a.min(b));
-    let max_intensity_f32 = intensity_f32
-        .iter()
-        .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-
-    // Normalize intensity to 0-255 range and convert to appropriate types
-    let intensity_range = max_intensity_f32 - min_intensity_f32;
-    let intensity_scale = if intensity_range > 0.0 {
-        255.0 / intensity_range
-    } else {
-        0.0
-    };
-
-    for i in 0..num_points {
-        x_coords.push(f16::from_f32(x_f32[i]));
-        y_coords.push(f16::from_f32(y_f32[i]));
-        z_coords.push(f16::from_f32(z_f32[i]));
-
-        // Normalize and convert intensity to u8
-        let normalized_intensity = if intensity_range > 0.0 {
-            ((intensity_f32[i] - min_intensity_f32) * intensity_scale).clamp(0.0, 255.0) as u8
-        } else {
-            0u8
-        };
-        intensities.push(normalized_intensity);
-    }
-
-    PointCloud {
-        x: x_coords,
-        y: y_coords,
-        z: z_coords,
-        intensity: intensities,
-        min_coord: glam::Vec3::new(min_x, min_y, min_z),
-        max_coord: glam::Vec3::new(max_x, max_y, max_z),
-        min_intensity: 0u8,   // Always 0 after normalization
-        max_intensity: 255u8, // Always 255 after normalization
-    }
-}
-
-fn load_pcd(filename: &str) -> Option<PointCloud> {
-    println!("Loading {}\n", filename);
-    let start = std::time::Instant::now();
-    let res = RobustPcdReader::read_pcd_file(&filename);
-    let load_time = start.elapsed().as_millis();
-    if res.is_err() {
-        println!("Failed to load file {}: {}", filename, res.err().unwrap());
-        exit(-1);
-    }
-
-    let pcd_data = res.unwrap();
-    println!(
-        "[Read done, {} ms : {} points]",
-        load_time,
-        pcd_data.1.len()
-    );
-    print!("Available dimensions: ");
-    for field in pcd_data.0.fields.iter() {
-        print!("{} ", field.name);
-    }
-    println!();
-    println!();
-
-    let pointcloud = parse_pcd(pcd_data);
-
-    println!(
-        "PointCloud summary:\n- Points: {}\n- X: min {} max {}\n- Y: min {} max {}\n- Z: min {} max {}\n- Intensity: min {} max {}",
-        pointcloud.x.len(),
-        pointcloud.min_coord.x,
-        pointcloud.max_coord.x,
-        pointcloud.min_coord.y,
-        pointcloud.max_coord.y,
-        pointcloud.min_coord.z,
-        pointcloud.max_coord.z,
-        pointcloud.min_intensity,
-        pointcloud.max_intensity
-    );
-    Some(pointcloud)
 }
 
 fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
@@ -289,8 +149,8 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         y: Vec::new(),
         z: Vec::new(),
         intensity: Vec::new(),
-        min_coord: glam::Vec3::ZERO,
-        max_coord: glam::Vec3::ZERO,
+        min_coord: [0.0, 0.0, 0.0],
+        max_coord: [0.0, 0.0, 0.0],
         min_intensity: 0u8,
         max_intensity: 255u8,
     };
@@ -312,7 +172,7 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         pointcloud
             .x
             .push(if let pcd_rs::Field::F32(ref values) = field_x {
-                f16::from_f32(values[0])
+                values[0]
             } else {
                 eprintln!("Expected F32 for x field. Found different type.");
                 continue;
@@ -320,7 +180,7 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         pointcloud
             .y
             .push(if let pcd_rs::Field::F32(ref values) = field_y {
-                f16::from_f32(values[0])
+                values[0]
             } else {
                 eprintln!("Expected F32 for y field. Found different type.");
                 continue;
@@ -328,7 +188,7 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         pointcloud
             .z
             .push(if let pcd_rs::Field::F32(ref values) = field_z {
-                f16::from_f32(values[0])
+                values[0]
             } else {
                 eprintln!("Expected F32 for z field. Found different type.");
                 continue;
@@ -338,14 +198,41 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
                 .intensity
                 .push(if let pcd_rs::Field::F32(ref values) = field_intensity {
                     // Normalize intensity to 0-255 range
-                    let norm_intensity = (values[0].clamp(0.0, 1.0) * 255.0) as u8;
-                    norm_intensity
+                    values[0] as u8
                 } else {
                     0u8
                 });
         } else {
             pointcloud.intensity.push(0u8);
         }
+    }
+
+    // Compute bounding box
+    pointcloud.min_coord = [
+        pointcloud.x.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
+        pointcloud.y.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
+        pointcloud.z.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
+    ];
+    pointcloud.max_coord = [
+        pointcloud.x.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
+        pointcloud.y.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
+        pointcloud.z.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
+    ];
+
+    // rescale intensity to 0-255
+    if has_intensity {
+        let (min_intensity, max_intensity) = pointcloud
+            .intensity
+            .iter()
+            .fold((u8::MAX, u8::MIN), |(min, max), &val| (min.min(val), max.max(val)));
+        pointcloud.intensity = pointcloud
+            .intensity
+            .iter()
+            .map(|&val| {
+                ((val - min_intensity) as f32 / (max_intensity - min_intensity) as f32 * 255.0)
+                    as u8
+            })
+            .collect();
     }
 
     let load_time = start.elapsed().as_millis();
@@ -383,15 +270,14 @@ fn main() {
     }
 
     let pointcloud = load_pcd_streaming(&filename);
+    if pointcloud.is_none() {
+        println!("Failed to load point cloud");
+        return;
+    }
+    let pointcloud = pointcloud.unwrap();
 
-    // if pointcloud.is_none() {
-    //     println!("Failed to load point cloud");
-    //     return;
-    // }
-    // let pointcloud = pointcloud.unwrap();
-
-    // println!("Starting renderer...");
-    // let event_loop = EventLoop::new().unwrap();
-    // let mut app = App::new(pointcloud);
-    // event_loop.run_app(&mut app).unwrap();
+    println!("Starting renderer...");
+    let event_loop = EventLoop::new().unwrap();
+    let mut app = App::new(pointcloud);
+    event_loop.run_app(&mut app).unwrap();
 }

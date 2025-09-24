@@ -433,37 +433,34 @@ impl Renderer {
         let mut vertices = Vec::new();
 
         // Normalize coordinates to fit in the view
-        let center = (pointcloud.min_coord + pointcloud.max_coord) * 0.5;
-        let extent = pointcloud.max_coord - pointcloud.min_coord;
-        let max_extent = extent.x.max(extent.y.max(extent.z));
+        let center = [
+            (pointcloud.min_coord[0] + pointcloud.max_coord[0]) * 0.5,
+            (pointcloud.min_coord[1] + pointcloud.max_coord[1]) * 0.5,
+            (pointcloud.min_coord[2] + pointcloud.max_coord[2]) * 0.5,
+        ];
+        let extent = [
+            pointcloud.max_coord[0] - pointcloud.min_coord[0],
+            pointcloud.max_coord[1] - pointcloud.min_coord[1],
+            pointcloud.max_coord[2] - pointcloud.min_coord[2],
+        ];
+        let max_extent = extent[0].max(extent[1].max(extent[2]));
         let scale = if max_extent > 0.0 {
             2.0 / max_extent
         } else {
             1.0
         };
 
-        // Iterate through all points using indices (Structure of Arrays)
         for i in 0..pointcloud.x.len() {
-            // Convert f16 coordinates to f32 for processing
-            let x_f32 = pointcloud.x[i].to_f32();
-            let y_f32 = pointcloud.y[i].to_f32();
-            let z_f32 = pointcloud.z[i].to_f32();
-
-            // Normalize position relative to center and scale
             let position = [
-                (x_f32 - center.x) * scale,
-                (y_f32 - center.y) * scale,
-                (z_f32 - center.z) * scale,
+                (pointcloud.x[i] - center[0]) * scale,
+                (pointcloud.y[i] - center[1]) * scale,
+                (pointcloud.z[i] - center[2]) * scale,
             ];
-
-            // Convert u8 intensity to f32 for color calculation
-            let intensity_f32 = pointcloud.intensity[i] as f32;
-            
             // Create rainbow color based on intensity (already normalized to 0-255)
             let color = Self::intensity_to_rainbow_color(
-                intensity_f32,
-                pointcloud.min_intensity as f32,
-                pointcloud.max_intensity as f32,
+                pointcloud.intensity[i],
+                pointcloud.min_intensity,
+                pointcloud.max_intensity,
             );
 
             vertices.push(Vertex { position, color });
@@ -473,13 +470,13 @@ impl Renderer {
     }
 
     fn intensity_to_rainbow_color(
-        intensity: f32,
-        min_intensity: f32,
-        max_intensity: f32,
+        intensity: u8,
+        min_intensity: u8,
+        max_intensity: u8,
     ) -> [f32; 3] {
         // Normalize intensity to [0, 1]
         let normalized = if max_intensity > min_intensity {
-            (intensity - min_intensity) / (max_intensity - min_intensity)
+            (intensity - min_intensity) as f32 / (max_intensity - min_intensity) as f32
         } else {
             0.5 // Default to middle if no intensity variation
         };

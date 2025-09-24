@@ -11,11 +11,7 @@ wgpu = "22.0"
 winit = "0.30"
 env_logger = "0.11"
 pollster = "0.3"
-# bytemuck = { version = "1.4", features = [ "derive" ] }
 bytemuck = { version = "1.4", features = [ "derive" ] }
 glam = "0.27"
 memmap2 = "0.9.8"
-threecrate-io = { version = "0.4.0", features = ["io-mmap"] }
-threecrate-core = "0.4.0"
-half = { version = "2.3", features = ["bytemuck"] }
 pcd-rs = "0.8"
