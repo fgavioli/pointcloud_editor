@@ -366,6 +366,9 @@ impl Renderer {
         let dt = self.last_render_time.elapsed();
         self.last_render_time = std::time::Instant::now();
 
+        // Track FPS and render latency
+        self.update_fps_counter(dt);
+
         self.camera_controller.update(&mut self.camera, dt);
         self.vp_mat = self
             .camera
@@ -376,6 +379,15 @@ impl Renderer {
             0,
             bytemuck::cast_slice(&[self.vp_mat]),
         );
+    }
+
+    fn update_fps_counter(&mut self, frame_time: std::time::Duration) {
+        let frame_time_ms = frame_time.as_secs_f32() * 1000.0;
+        let fps = 1.0 / frame_time.as_secs_f32();
+        // Update window title with FPS info
+        let title = format!("Point Cloud Editor | {:.0} FPS | Frametime: {:.2}ms",
+                            fps, frame_time_ms);
+        self.window.set_title(&title);
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
