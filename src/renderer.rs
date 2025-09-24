@@ -315,34 +315,19 @@ struct CameraVectors {
 // UTILITY FUNCTIONS
 // ============================================================================
 
-struct ColorUtils;
-impl ColorUtils {
-    fn intensity_to_rainbow_color(intensity: u8, min_intensity: u8, max_intensity: u8) -> [f32; 3] {
-        let normalized = if max_intensity > min_intensity {
-            (intensity - min_intensity) as f32 / (max_intensity - min_intensity) as f32
-        } else {
-            0.5
-        };
-        let hue = normalized * 240.0;
-        Self::hsv_to_rgb(hue, 1.0, 1.0)
-    }
-
-    fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
-        let c = v * s;
-        let h_prime = h / 60.0;
-        let x = c * (1.0 - ((h_prime % 2.0) - 1.0).abs());
-        let m = v - c;
-
-        let (r_prime, g_prime, b_prime) = match h_prime as i32 {
-            0 => (c, x, 0.0),
-            1 => (x, c, 0.0),
-            2 => (0.0, c, x),
-            3 => (0.0, x, c),
-            4 => (x, 0.0, c),
-            _ => (c, 0.0, x),
-        };
-
-        [r_prime + m, g_prime + m, b_prime + m]
+fn get_rainbow_color(intensity: u8, min_intensity: u8, max_intensity: u8) -> [f32; 3] {
+    let normalized = if max_intensity > min_intensity {
+        (intensity - min_intensity) as f32 / (max_intensity - min_intensity) as f32
+    } else {
+        0.5
+    };
+    // Reversed RGB rainbow: Red -> Yellow -> Green -> Cyan -> Blue
+    match (normalized * 4.0) as i32 {
+        0 => [1.0, normalized * 4.0, 0.0], // Red to Yellow
+        1 => [1.0 - ((normalized * 4.0) - 1.0), 1.0, 0.0], // Yellow to Green
+        2 => [0.0, 1.0, (normalized * 4.0) - 2.0], // Green to Cyan
+        3 => [0.0, 1.0 - ((normalized * 4.0) - 3.0), 1.0], // Cyan to Blue
+        _ => [0.0, 0.0, 1.0], // Blue
     }
 }
 
@@ -536,7 +521,7 @@ impl Renderer {
 
         for i in 0..pointcloud.x.len() {
             let position = [pointcloud.x[i], pointcloud.y[i], pointcloud.z[i]];
-            let color = ColorUtils::intensity_to_rainbow_color(
+            let color = get_rainbow_color(
                 pointcloud.intensity[i],
                 pointcloud.min_intensity,
                 pointcloud.max_intensity,
