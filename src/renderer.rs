@@ -4,8 +4,11 @@ use winit::{
     keyboard::{Key, NamedKey},
     window::Window,
 };
-
 use crate::PointCloud;
+
+// ============================================================================
+// DATA STRUCTURES
+// ============================================================================
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -41,6 +44,10 @@ pub struct CameraUniform {
     view_proj: [[f32; 4]; 4],
 }
 
+// ============================================================================
+// CAMERA SYSTEM
+// ============================================================================
+
 pub struct Camera {
     pub eye: glam::Vec3,
     pub target: glam::Vec3,
@@ -52,39 +59,46 @@ pub struct Camera {
 }
 
 impl Camera {
+    fn new(aspect: f32, fovy: f32, znear: f32, zfar: f32) -> Self {
+        Self {
+            eye: glam::Vec3::ZERO,
+            target: glam::Vec3::ZERO,
+            up: glam::Vec3::Z,
+            aspect,
+            fovy,
+            znear,
+            zfar,
+        }
+    }
+
     pub fn build_view_projection_matrix(&self) -> glam::Mat4 {
         let view = glam::Mat4::look_at_rh(self.eye, self.target, self.up);
         let proj = glam::Mat4::perspective_rh(self.fovy, self.aspect, self.znear, self.zfar);
         proj * view
     }
+
+    fn update_aspect(&mut self, aspect: f32) {
+        self.aspect = aspect;
+    }
 }
 
-pub struct CameraController {
-    pub speed: f32,
-    pub sensitivity: f32,
-    pub zoom_speed: f32,
-    pub is_left_pressed: bool,
-    pub is_right_pressed: bool,
-    pub is_up_pressed: bool,        // W key for zoom in
-    pub is_down_pressed: bool,      // S key for zoom out
-    pub is_pan_up_pressed: bool,    // Q key for pan up
-    pub is_pan_down_pressed: bool,  // E key for pan down
-    pub is_mouse_pressed: bool,     // Left mouse button for orbiting
-    pub is_right_mouse_pressed: bool, // Right mouse button for zooming
-    pub last_mouse_pos: glam::Vec2,
-    // Orbit mode parameters
-    pub distance: f32,
-    pub theta: f32, // Horizontal angle (azimuth)
-    pub phi: f32,   // Vertical angle (elevation)
-    pub target: glam::Vec3, // Center point to orbit around
+struct InputState {
+    // Keyboard states
+    is_left_pressed: bool,
+    is_right_pressed: bool,
+    is_up_pressed: bool,
+    is_down_pressed: bool,
+    is_pan_up_pressed: bool,
+    is_pan_down_pressed: bool,
+    // Mouse states
+    is_mouse_pressed: bool,
+    is_right_mouse_pressed: bool,
+    last_mouse_pos: glam::Vec2,
 }
 
-impl CameraController {
-    pub fn new(speed: f32, target: glam::Vec3, initial_distance: f32) -> Self {
+impl Default for InputState {
+    fn default() -> Self {
         Self {
-            speed,
-            sensitivity: 0.005,
-            zoom_speed: 0.1,
             is_left_pressed: false,
             is_right_pressed: false,
             is_up_pressed: false,
@@ -94,145 +108,171 @@ impl CameraController {
             is_mouse_pressed: false,
             is_right_mouse_pressed: false,
             last_mouse_pos: glam::Vec2::ZERO,
+        }
+    }
+}
+
+pub struct CameraController {
+    // Configuration
+    speed: f32,
+    sensitivity: f32,
+    zoom_speed: f32,
+    // Input state
+    input: InputState,
+    // Orbit parameters
+    pub distance: f32,
+    pub theta: f32, // Horizontal angle (azimuth)
+    pub phi: f32,   // Vertical angle (elevation)
+    pub target: glam::Vec3, // Center point to orbit around
+}
+
+impl CameraController {
+    fn new(speed: f32, target: glam::Vec3, initial_distance: f32) -> Self {
+        Self {
+            speed,
+            sensitivity: 0.005,
+            zoom_speed: 0.1,
+            input: InputState::default(),
             distance: initial_distance,
-            theta: 0.0_f32.to_radians(),   // Start aligned with Y-axis
-            phi: -89.0_f32.to_radians(),   // Start looking down at 89 degrees from top
+            theta: 0.0_f32.to_radians(),
+            phi: -89.0_f32.to_radians(),
             target,
         }
     }
 
-    pub fn process_events(&mut self, event: &WindowEvent) -> bool {
-        match event {
-            WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        logical_key: key,
-                        state,
-                        ..
-                    },
-                ..
-            } => {
-                let is_pressed = *state == ElementState::Pressed;
-                match key {
-                    Key::Named(NamedKey::ArrowUp) => {
-                        self.is_up_pressed = is_pressed;
-                        true
-                    }
-                    Key::Character(s) if s == "w" => {
-                        self.is_up_pressed = is_pressed;
-                        true
-                    }
-                    Key::Named(NamedKey::ArrowDown) => {
-                        self.is_down_pressed = is_pressed;
-                        true
-                    }
-                    Key::Character(s) if s == "s" => {
-                        self.is_down_pressed = is_pressed;
-                        true
-                    }
-                    Key::Named(NamedKey::ArrowLeft) => {
-                        self.is_left_pressed = is_pressed;
-                        true
-                    }
-                    Key::Character(s) if s == "a" => {
-                        self.is_left_pressed = is_pressed;
-                        true
-                    }
-                    Key::Named(NamedKey::ArrowRight) => {
-                        self.is_right_pressed = is_pressed;
-                        true
-                    }
-                    Key::Character(s) if s == "d" => {
-                        self.is_right_pressed = is_pressed;
-                        true
-                    }
-                    Key::Character(s) if s == "q" => {
-                        self.is_pan_up_pressed = is_pressed;
-                        true
-                    }
-                    Key::Character(s) if s == "e" => {
-                        self.is_pan_down_pressed = is_pressed;
-                        true
-                    }
-                    _ => false,
-                }
-            }
-            WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Left,
-                ..
-            } => {
-                self.is_mouse_pressed = *state == ElementState::Pressed;
+    fn handle_keyboard_input(&mut self, key: &Key, is_pressed: bool) -> bool {
+        match key {
+            Key::Named(NamedKey::ArrowUp) => {
+                self.input.is_up_pressed = is_pressed;
                 true
             }
-            WindowEvent::MouseInput {
-                state,
-                button: MouseButton::Right,
-                ..
-            } => {
-                self.is_right_mouse_pressed = *state == ElementState::Pressed;
+            Key::Character(s) if s.as_str() == "w" => {
+                self.input.is_up_pressed = is_pressed;
                 true
             }
-            WindowEvent::CursorMoved { position, .. } => {
-                let new_pos = glam::Vec2::new(position.x as f32, position.y as f32);
-                if self.is_mouse_pressed {
-                    let delta = new_pos - self.last_mouse_pos;
-                    // Orbit camera based on mouse movement
-                    self.theta -= delta.x * self.sensitivity; // Horizontal rotation (yaw) - reversed for natural feel
-                    self.phi -= delta.y * self.sensitivity;   // Vertical rotation (pitch)
-
-                    // Clamp phi to prevent flipping (pitch should be between -90 and +90 degrees)
-                    self.phi = self.phi.clamp(-std::f32::consts::FRAC_PI_2 + 0.1, std::f32::consts::FRAC_PI_2 - 0.1);
-
-                    self.last_mouse_pos = new_pos;
-                    true
-                } else if self.is_right_mouse_pressed {
-                    let delta = new_pos - self.last_mouse_pos;
-                    // Zoom camera based on vertical mouse movement (ignore horizontal)
-                    // Make zoom speed proportional to current distance for natural feel
-                    let zoom_amount = -delta.y * self.sensitivity * self.distance * 0.5;
-                    self.distance += zoom_amount;
-                    // Prevent zooming too close
-                    self.distance = self.distance.clamp(0.1, f32::MAX);
-
-                    self.last_mouse_pos = new_pos;
-                    true
-                } else {
-                    self.last_mouse_pos = new_pos;
-                    false
-                }
+            Key::Named(NamedKey::ArrowDown) => {
+                self.input.is_down_pressed = is_pressed;
+                true
             }
-            WindowEvent::MouseWheel { delta, .. } => {
-                // Handle zoom with mouse wheel - make proportional to distance
-                let base_zoom = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => -y * self.zoom_speed,
-                    MouseScrollDelta::PixelDelta(pos) => -pos.y as f32 * 0.01 * self.zoom_speed,
-                };
-                // Make zoom proportional to current distance for natural feel
-                let zoom_amount = base_zoom * self.distance;
-                self.distance += zoom_amount;
-                // Prevent zooming too close
-                self.distance = self.distance.clamp(0.1, f32::MAX);
+            Key::Character(s) if s.as_str() == "s" => {
+                self.input.is_down_pressed = is_pressed;
+                true
+            }
+            Key::Named(NamedKey::ArrowLeft) => {
+                self.input.is_left_pressed = is_pressed;
+                true
+            }
+            Key::Character(s) if s.as_str() == "a" => {
+                self.input.is_left_pressed = is_pressed;
+                true
+            }
+            Key::Named(NamedKey::ArrowRight) => {
+                self.input.is_right_pressed = is_pressed;
+                true
+            }
+            Key::Character(s) if s.as_str() == "d" => {
+                self.input.is_right_pressed = is_pressed;
+                true
+            }
+            Key::Character(s) if s.as_str() == "q" => {
+                self.input.is_pan_up_pressed = is_pressed;
+                true
+            }
+            Key::Character(s) if s.as_str() == "e" => {
+                self.input.is_pan_down_pressed = is_pressed;
                 true
             }
             _ => false,
         }
     }
 
-    pub fn update_camera(&mut self, camera: &mut Camera, dt: std::time::Duration) {
-        let dt = dt.as_secs_f32();
+    fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) -> bool {
+        let is_pressed = state == ElementState::Pressed;
+        match button {
+            MouseButton::Left => {
+                self.input.is_mouse_pressed = is_pressed;
+                true
+            }
+            MouseButton::Right => {
+                self.input.is_right_mouse_pressed = is_pressed;
+                true
+            }
+            _ => false,
+        }
+    }
 
-        // Handle zoom with W/S keys
-        if self.is_up_pressed {
-            self.distance -= self.zoom_speed * dt * 10.0; // Zoom in
+    fn handle_cursor_moved(&mut self, new_pos: glam::Vec2) -> bool {
+        if self.input.is_mouse_pressed {
+            let delta = new_pos - self.input.last_mouse_pos;
+            self.theta -= delta.x * self.sensitivity;
+            self.phi -= delta.y * self.sensitivity;
+            self.phi = self.phi.clamp(-std::f32::consts::FRAC_PI_2 + 0.1, std::f32::consts::FRAC_PI_2 - 0.1);
+            self.input.last_mouse_pos = new_pos;
+            true
+        } else if self.input.is_right_mouse_pressed {
+            let delta = new_pos - self.input.last_mouse_pos;
+            let zoom_amount = -delta.y * self.sensitivity * self.distance * 0.5;
+            self.distance = (self.distance + zoom_amount).clamp(0.1, f32::MAX);
+            self.input.last_mouse_pos = new_pos;
+            true
+        } else {
+            self.input.last_mouse_pos = new_pos;
+            false
         }
-        if self.is_down_pressed {
-            self.distance += self.zoom_speed * dt * 10.0; // Zoom out
+    }
+
+    fn handle_mouse_wheel(&mut self, delta: &MouseScrollDelta) {
+        let base_zoom = match delta {
+            MouseScrollDelta::LineDelta(_, y) => -y * self.zoom_speed,
+            MouseScrollDelta::PixelDelta(pos) => -pos.y as f32 * 0.01 * self.zoom_speed,
+        };
+        let zoom_amount = base_zoom * self.distance;
+        self.distance = (self.distance + zoom_amount).clamp(0.1, f32::MAX);
+    }
+
+    pub fn process_events(&mut self, event: &WindowEvent) -> bool {
+        match event {
+            WindowEvent::KeyboardInput { event: KeyEvent { logical_key: key, state, .. }, .. } => {
+                self.handle_keyboard_input(key, *state == ElementState::Pressed)
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                self.handle_mouse_input(*state, *button)
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                let new_pos = glam::Vec2::new(position.x as f32, position.y as f32);
+                self.handle_cursor_moved(new_pos)
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                self.handle_mouse_wheel(delta);
+                true
+            }
+            _ => false,
         }
-        // Clamp distance to prevent zooming too close
+    }
+
+    fn update_distance(&mut self, dt: f32) {
+        if self.input.is_up_pressed {
+            self.distance -= self.zoom_speed * dt * 10.0;
+        }
+        if self.input.is_down_pressed {
+            self.distance += self.zoom_speed * dt * 10.0;
+        }
         self.distance = self.distance.clamp(0.1, f32::MAX);
+    }
 
-        // Handle keyboard movement - move the orbit target for panning
+    fn update_target(&mut self, dt: f32) {
+        let camera_vectors = self.calculate_camera_vectors();
+        let mut target_movement = glam::Vec3::ZERO;
+
+        if self.input.is_right_pressed { target_movement -= camera_vectors.right; }
+        if self.input.is_left_pressed { target_movement += camera_vectors.right; }
+        if self.input.is_pan_up_pressed { target_movement += camera_vectors.up; }
+        if self.input.is_pan_down_pressed { target_movement -= camera_vectors.up; }
+
+        self.target += target_movement * self.speed * dt;
+    }
+
+    fn calculate_camera_vectors(&self) -> CameraVectors {
         let forward = glam::Vec3::new(
             self.theta.cos() * self.phi.cos(),
             self.theta.sin() * self.phi.cos(),
@@ -241,40 +281,68 @@ impl CameraController {
         let right = forward.cross(glam::Vec3::Z).normalize();
         let up = glam::Vec3::Z;
 
-        let mut target_movement = glam::Vec3::ZERO;
-        if self.is_right_pressed {
-            target_movement -= right;
-        }
-        if self.is_left_pressed {
-            target_movement += right;
-        }
-        if self.is_pan_up_pressed {
-            target_movement += up;
-        }
-        if self.is_pan_down_pressed {
-            target_movement -= up;
-        }
+        CameraVectors { forward, right, up }
+    }
 
-        target_movement *= self.speed * dt;
-        self.target += target_movement;
-
-        // Calculate camera position using proper yaw/pitch rotations for Z-up system
-        // Start with a base forward vector pointing along -Y axis (since Z is up)
+    fn update_camera_position(&self, camera: &mut Camera) {
         let base_forward = glam::Vec3::new(0.0, -1.0, 0.0);
-        
-        // Apply yaw rotation (around world Z-axis - the up axis)
         let yaw_rotation = glam::Mat3::from_rotation_z(self.theta);
         let yawed_forward = yaw_rotation * base_forward;
-        
-        // Apply pitch rotation (around the local X-axis after yaw)
         let right_vector = yawed_forward.cross(glam::Vec3::Z).normalize();
         let pitch_rotation = glam::Mat3::from_axis_angle(right_vector, self.phi);
         let final_forward = pitch_rotation * yawed_forward;
-        
-        // Position camera at distance from target in the opposite direction
+
         camera.eye = self.target - final_forward * self.distance;
         camera.target = self.target;
         camera.up = glam::Vec3::Z;
+    }
+
+    pub fn update_camera(&mut self, camera: &mut Camera, dt: std::time::Duration) {
+        let dt = dt.as_secs_f32();
+        self.update_distance(dt);
+        self.update_target(dt);
+        self.update_camera_position(camera);
+    }
+}
+
+struct CameraVectors {
+    forward: glam::Vec3,
+    right: glam::Vec3,
+    up: glam::Vec3,
+}
+
+// ============================================================================
+// UTILITY FUNCTIONS
+// ============================================================================
+
+struct ColorUtils;
+impl ColorUtils {
+    fn intensity_to_rainbow_color(intensity: u8, min_intensity: u8, max_intensity: u8) -> [f32; 3] {
+        let normalized = if max_intensity > min_intensity {
+            (intensity - min_intensity) as f32 / (max_intensity - min_intensity) as f32
+        } else {
+            0.5
+        };
+        let hue = normalized * 240.0;
+        Self::hsv_to_rgb(hue, 1.0, 1.0)
+    }
+
+    fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
+        let c = v * s;
+        let h_prime = h / 60.0;
+        let x = c * (1.0 - ((h_prime % 2.0) - 1.0).abs());
+        let m = v - c;
+
+        let (r_prime, g_prime, b_prime) = match h_prime as i32 {
+            0 => (c, x, 0.0),
+            1 => (x, c, 0.0),
+            2 => (0.0, c, x),
+            3 => (0.0, x, c),
+            4 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+
+        [r_prime + m, g_prime + m, b_prime + m]
     }
 }
 
@@ -292,6 +360,7 @@ pub struct Renderer {
     camera_uniform: CameraUniform,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    camera_bind_group_layout: wgpu::BindGroupLayout,
     last_render_time: std::time::Instant,
     window: std::sync::Arc<Window>,
 }
@@ -299,14 +368,80 @@ pub struct Renderer {
 impl Renderer {
     pub async fn new(window: std::sync::Arc<Window>, pointcloud: &PointCloud) -> Self {
         let size = window.inner_size();
+        let target = glam::Vec3::new(
+            (pointcloud.max_coord[0] + pointcloud.min_coord[0]) / 2.0,
+            (pointcloud.max_coord[1] + pointcloud.min_coord[1]) / 2.0,
+            pointcloud.min_coord[2],
+        );
+        let max_extent = pointcloud.size.x.max(pointcloud.size.y).max(pointcloud.size.z);
 
+        // Initialize WGPU resources
+        let (surface, device, queue, config) = Self::init_wgpu(window.clone(), size).await;
+
+        // Setup camera
+        let mut camera = Camera::new(
+            config.width as f32 / config.height as f32,
+            60.0_f32.to_radians(),
+            0.1,
+            max_extent * 20.0,
+        );
+
+        // Position camera above point cloud
+        camera.eye = glam::Vec3::new(0.0, 0.0, pointcloud.max_coord[2] + max_extent * 0.5);
+        camera.target = target;
+
+        // Initial camera distance is calculated as the distance at which the frustum
+        // plane has a width equal to the maximum horizontal size of the model.
+        // d = (modelMaxHSize / (2tan(fov))) + (horizontalSize / 2)
+        let initial_camera_distance = (pointcloud.size.x / 2.0) / (camera.fovy / 2.0).tan();
+        let camera_controller = CameraController::new(
+            max_extent * 0.1,
+            target,
+            initial_camera_distance,
+        );
+
+        // Setup camera uniforms
+        let (camera_uniform, camera_buffer, camera_bind_group, camera_bind_group_layout) = 
+            Self::setup_camera_uniforms(&device, &camera);
+
+        // Create vertex data and buffers
+        let vertices = Self::create_vertices_from_pointcloud(pointcloud);
+        let (vertex_buffers, vertex_counts) = Self::create_vertex_buffers(&device, vertices);
+
+        // Create render pipeline
+        let render_pipeline = Self::create_render_pipeline(&device, &config, &camera_bind_group_layout);
+
+        Self {
+            surface,
+            device,
+            queue,
+            config,
+            size,
+            render_pipeline,
+            vertex_buffers,
+            vertex_counts,
+            camera,
+            camera_controller,
+            camera_uniform,
+            camera_buffer,
+            camera_bind_group,
+            camera_bind_group_layout,
+            last_render_time: std::time::Instant::now(),
+            window,
+        }
+    }
+
+    // WGPU Initialization
+    async fn init_wgpu(
+        window: std::sync::Arc<Window>,
+        size: winit::dpi::PhysicalSize<u32>,
+    ) -> (wgpu::Surface<'static>, wgpu::Device, wgpu::Queue, wgpu::SurfaceConfiguration) {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
 
-        let surface = instance.create_surface(window.clone()).unwrap();
-
+        let surface = instance.create_surface(window).unwrap();
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -349,40 +484,14 @@ impl Renderer {
         };
 
         surface.configure(&device, &config);
+        (surface, device, queue, config)
+    }
 
-        // center camera target to z = 0 and x,y to pointcloud center
-        let target = glam::Vec3::new(
-            (pointcloud.max_coord[0] + pointcloud.min_coord[0]) / 2.0,
-            (pointcloud.max_coord[1] + pointcloud.min_coord[1]) / 2.0,
-            0.0,
-        );
-        
-        // Calculate actual point cloud extent for camera positioning
-        let extent_x = pointcloud.max_coord[0] - pointcloud.min_coord[0];
-        let extent_y = pointcloud.max_coord[1] - pointcloud.min_coord[1];
-        let extent_z = pointcloud.max_coord[2] - pointcloud.min_coord[2];
-        let max_extent = extent_x.max(extent_y).max(extent_z);
-
-        // Position camera above the point cloud, centered on X-Y plane
-        let camera_distance = max_extent * 2.5; // Distance from target
-        let camera_z_top = pointcloud.max_coord[2] + max_extent * 0.5; // Above the top of the point cloud
-
-        let camera = Camera {
-            eye: glam::Vec3::new(0.0, 0.0, camera_z_top), // Centered on X-Y, top of Z
-            target: target,
-            up: glam::Vec3::Z,  // Z is up in this coordinate system
-            aspect: config.width as f32 / config.height as f32,
-            fovy: 60.0_f32.to_radians(), // Wider field of view for better visibility
-            znear: 0.1,
-            zfar: max_extent * 20.0,
-        };
-
-        let camera_controller = CameraController::new(
-            max_extent * 0.1,
-            target,
-            camera_distance  // Use the distance for proper orbit calculations
-        );
-
+    // Camera Setup
+    fn setup_camera_uniforms(
+        device: &wgpu::Device,
+        camera: &Camera,
+    ) -> (CameraUniform, wgpu::Buffer, wgpu::BindGroup, wgpu::BindGroupLayout) {
         let mut camera_uniform = CameraUniform {
             view_proj: [[0.0; 4]; 4],
         };
@@ -418,20 +527,71 @@ impl Renderer {
             label: Some("camera_bind_group"),
         });
 
-        // Convert point cloud to vertices with rainbow colors and split into chunks
-        let vertices = Self::create_vertices_from_pointcloud(pointcloud);
-        let (vertex_buffers, vertex_counts) = Self::create_vertex_buffers(&device, vertices);
+        (camera_uniform, camera_buffer, camera_bind_group, camera_bind_group_layout)
+    }
 
+    // Vertex Processing
+    fn create_vertices_from_pointcloud(pointcloud: &PointCloud) -> Vec<Vertex> {
+        let mut vertices = Vec::with_capacity(pointcloud.x.len());
+
+        for i in 0..pointcloud.x.len() {
+            let position = [pointcloud.x[i], pointcloud.y[i], pointcloud.z[i]];
+            let color = ColorUtils::intensity_to_rainbow_color(
+                pointcloud.intensity[i],
+                pointcloud.min_intensity,
+                pointcloud.max_intensity,
+            );
+            vertices.push(Vertex { position, color });
+        }
+
+        vertices
+    }
+
+    fn create_vertex_buffers(
+        device: &wgpu::Device,
+        vertices: Vec<Vertex>,
+    ) -> (Vec<wgpu::Buffer>, Vec<u32>) {
+        const MAX_BUFFER_SIZE: usize = 200_000_000;
+        let vertex_size = std::mem::size_of::<Vertex>();
+        let max_vertices_per_buffer = MAX_BUFFER_SIZE / vertex_size;
+
+        let mut buffers = Vec::new();
+        let mut counts = Vec::new();
+
+        println!("Total vertices: {}", vertices.len());
+        println!("Max vertices per buffer: {}", max_vertices_per_buffer);
+
+        for chunk in vertices.chunks(max_vertices_per_buffer) {
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("Vertex Buffer Chunk"),
+                contents: bytemuck::cast_slice(chunk),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+
+            buffers.push(buffer);
+            counts.push(chunk.len() as u32);
+        }
+
+        println!("Created {} vertex buffers", buffers.len());
+        (buffers, counts)
+    }
+
+    // Pipeline Setup
+    fn create_render_pipeline(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        camera_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout],
+                bind_group_layouts: &[camera_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Render Pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
@@ -467,121 +627,10 @@ impl Renderer {
             },
             multiview: None,
             cache: None,
-        });
-
-        Self {
-            window,
-            surface,
-            device,
-            queue,
-            config,
-            size,
-            render_pipeline,
-            vertex_buffers,
-            vertex_counts,
-            camera,
-            camera_controller,
-            camera_uniform,
-            camera_buffer,
-            camera_bind_group,
-            last_render_time: std::time::Instant::now(),
-        }
+        })
     }
 
-    fn create_vertex_buffers(
-        device: &wgpu::Device,
-        vertices: Vec<Vertex>,
-    ) -> (Vec<wgpu::Buffer>, Vec<u32>) {
-        const MAX_BUFFER_SIZE: usize = 200_000_000; // 200MB to be safe
-        let vertex_size = std::mem::size_of::<Vertex>();
-        let max_vertices_per_buffer = MAX_BUFFER_SIZE / vertex_size;
-
-        let mut buffers = Vec::new();
-        let mut counts = Vec::new();
-
-        println!("Total vertices: {}", vertices.len());
-        println!("Max vertices per buffer: {}", max_vertices_per_buffer);
-
-        for chunk in vertices.chunks(max_vertices_per_buffer) {
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer Chunk"),
-                contents: bytemuck::cast_slice(chunk),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-
-            buffers.push(buffer);
-            counts.push(chunk.len() as u32);
-        }
-
-        println!("Created {} vertex buffers", buffers.len());
-        (buffers, counts)
-    }
-
-    fn create_vertices_from_pointcloud(pointcloud: &PointCloud) -> Vec<Vertex> {
-        let mut vertices = Vec::new();
-
-        // Use original coordinates without scaling
-        for i in 0..pointcloud.x.len() {
-            let position = [
-                pointcloud.x[i],
-                pointcloud.y[i],
-                pointcloud.z[i],
-            ];
-            // Create rainbow color based on intensity (already normalized to 0-255)
-            let color = Self::intensity_to_rainbow_color(
-                pointcloud.intensity[i],
-                pointcloud.min_intensity,
-                pointcloud.max_intensity,
-            );
-
-            vertices.push(Vertex { position, color });
-        }
-
-        vertices
-    }
-
-    fn intensity_to_rainbow_color(
-        intensity: u8,
-        min_intensity: u8,
-        max_intensity: u8,
-    ) -> [f32; 3] {
-        // Normalize intensity to [0, 1]
-        let normalized = if max_intensity > min_intensity {
-            (intensity - min_intensity) as f32 / (max_intensity - min_intensity) as f32
-        } else {
-            0.5 // Default to middle if no intensity variation
-        };
-
-        // Create rainbow color: Red -> Yellow -> Green -> Cyan -> Blue -> Magenta -> Red
-        // We'll use Red -> Green -> Blue progression for simplicity
-        let hue = normalized * 240.0; // 0 to 240 degrees (red to blue in HSV)
-
-        Self::hsv_to_rgb(hue, 1.0, 1.0)
-    }
-
-    fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [f32; 3] {
-        let c = v * s;
-        let h_prime = h / 60.0;
-        let x = c * (1.0 - ((h_prime % 2.0) - 1.0).abs());
-        let m = v - c;
-
-        let (r_prime, g_prime, b_prime) = if h_prime >= 0.0 && h_prime < 1.0 {
-            (c, x, 0.0)
-        } else if h_prime >= 1.0 && h_prime < 2.0 {
-            (x, c, 0.0)
-        } else if h_prime >= 2.0 && h_prime < 3.0 {
-            (0.0, c, x)
-        } else if h_prime >= 3.0 && h_prime < 4.0 {
-            (0.0, x, c)
-        } else if h_prime >= 4.0 && h_prime < 5.0 {
-            (x, 0.0, c)
-        } else {
-            (c, 0.0, x)
-        };
-
-        [r_prime + m, g_prime + m, b_prime + m]
-    }
-
+    // Public Interface
     pub fn window(&self) -> &Window {
         &self.window
     }
@@ -592,7 +641,7 @@ impl Renderer {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
-            self.camera.aspect = self.config.width as f32 / self.config.height as f32;
+            self.camera.update_aspect(self.config.width as f32 / self.config.height as f32);
         }
     }
 
@@ -653,7 +702,6 @@ impl Renderer {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
 
-            // Render each vertex buffer chunk
             for (buffer, &count) in self.vertex_buffers.iter().zip(&self.vertex_counts) {
                 render_pass.set_vertex_buffer(0, buffer.slice(..));
                 render_pass.draw(0..count, 0..1);

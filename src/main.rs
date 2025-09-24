@@ -91,6 +91,7 @@ struct PointCloud {
     intensity: Vec<u8>,
     min_coord: [f32; 3],
     max_coord: [f32; 3],
+    size: glam::Vec3, // 3D size (extent) of the point cloud
     min_intensity: u8,
     max_intensity: u8,
 }
@@ -151,6 +152,7 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         intensity: Vec::new(),
         min_coord: [0.0, 0.0, 0.0],
         max_coord: [0.0, 0.0, 0.0],
+        size: glam::Vec3::ZERO,
         min_intensity: 0u8,
         max_intensity: 255u8,
     };
@@ -218,6 +220,13 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         pointcloud.y.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
         pointcloud.z.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
     ];
+
+    // Calculate 3D size (extent) of the point cloud
+    pointcloud.size = glam::Vec3::new(
+        pointcloud.max_coord[0] - pointcloud.min_coord[0],
+        pointcloud.max_coord[1] - pointcloud.min_coord[1],
+        pointcloud.max_coord[2] - pointcloud.min_coord[2],
+    );
 
     // rescale intensity to 0-255
     if has_intensity {
