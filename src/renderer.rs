@@ -1,7 +1,6 @@
 use wgpu::util::DeviceExt;
 use winit::{
     event::*,
-    keyboard::{Key, NamedKey},
     window::Window,
 };
 use crate::PointCloud;
@@ -351,8 +350,8 @@ impl Renderer {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
             self.camera.update_proj(
-                self.config.width as f32 / self.config.height as f32,
                 CAMERA_FOV,
+                self.config.width as f32 / self.config.height as f32,
                 Z_NEAR,
                 self.z_far,
             );

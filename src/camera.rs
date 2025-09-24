@@ -35,7 +35,7 @@ impl OrbitCamera {
         let final_forward = pitch_rotation * yawed_forward;
 
         self.eye = target - final_forward * distance;
-        self.target = self.target;
+        self.target = target;
     }
 
     pub fn update_proj(&mut self, fov: f32, aspect: f32, znear: f32, zfar: f32) {
