@@ -7,6 +7,8 @@ use winit::{
     window::{Window, WindowId},
 };
 mod renderer;
+mod camera;
+mod camera_controller;
 use renderer::Renderer;
 
 struct App {
