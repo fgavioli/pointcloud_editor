@@ -17,3 +17,5 @@ glam = "0.27"
 memmap2 = "0.9.8"
 threecrate-io = { version = "0.4.0", features = ["io-mmap"] }
 threecrate-core = "0.4.0"
+half = { version = "2.3", features = ["bytemuck"] }
+pcd-rs = "0.8"

@@ -155,7 +155,7 @@ impl CameraController {
             WindowEvent::CursorMoved { position, .. } => {
                 let new_pos = glam::Vec2::new(position.x as f32, position.y as f32);
                 if self.is_mouse_pressed {
-                    let delta = new_pos - self.last_mouse_pos;
+                    let _delta = new_pos - self.last_mouse_pos; // Keep for future use
                     self.last_mouse_pos = new_pos;
                     // We'll handle the delta in update_camera
                     true
@@ -442,19 +442,28 @@ impl Renderer {
             1.0
         };
 
-        for point in &pointcloud.points {
+        // Iterate through all points using indices (Structure of Arrays)
+        for i in 0..pointcloud.x.len() {
+            // Convert f16 coordinates to f32 for processing
+            let x_f32 = pointcloud.x[i].to_f32();
+            let y_f32 = pointcloud.y[i].to_f32();
+            let z_f32 = pointcloud.z[i].to_f32();
+
             // Normalize position relative to center and scale
             let position = [
-                (point.x - center.x) * scale,
-                (point.y - center.y) * scale,
-                (point.z - center.z) * scale,
+                (x_f32 - center.x) * scale,
+                (y_f32 - center.y) * scale,
+                (z_f32 - center.z) * scale,
             ];
 
-            // Create rainbow color based on intensity
+            // Convert u8 intensity to f32 for color calculation
+            let intensity_f32 = pointcloud.intensity[i] as f32;
+            
+            // Create rainbow color based on intensity (already normalized to 0-255)
             let color = Self::intensity_to_rainbow_color(
-                point.i,
-                pointcloud.min_intensity,
-                pointcloud.max_intensity,
+                intensity_f32,
+                pointcloud.min_intensity as f32,
+                pointcloud.max_intensity as f32,
             );
 
             vertices.push(Vertex { position, color });
