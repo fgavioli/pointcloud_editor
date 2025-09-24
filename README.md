@@ -7,7 +7,7 @@ Pointcloud editor is a .
 cargo build -r
 ```
 
-## running the utility
+## Running the utility
 With cargo:
 ```bash
 cargo run -r [path_to_pointcloud.pcd]
