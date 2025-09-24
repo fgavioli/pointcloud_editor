@@ -1,13 +1,13 @@
+use half::f16;
+use pcd_rs::{DynReader, DynRecord};
 use std::{env, process::exit, sync::Arc};
 use threecrate_io::RobustPcdReader;
-use half::f16;
 use winit::{
     application::ApplicationHandler,
     event::*,
     event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowId},
 };
-use pcd_rs::{DynReader, DynRecord};
 mod renderer;
 use renderer::Renderer;
 
@@ -141,13 +141,13 @@ fn parse_pcd(
         } else {
             0.0
         };
-        
+
         x_f32.push(x);
         y_f32.push(y);
         z_f32.push(z);
         intensity_f32.push(intensity);
     }
-    
+
     // Calculate bounds from f32 data
     let min_x = x_f32.iter().fold(f32::INFINITY, |a, &b| a.min(b));
     let max_x = x_f32.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
@@ -155,19 +155,25 @@ fn parse_pcd(
     let max_y = y_f32.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
     let min_z = z_f32.iter().fold(f32::INFINITY, |a, &b| a.min(b));
     let max_z = z_f32.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-    
+
     let min_intensity_f32 = intensity_f32.iter().fold(f32::INFINITY, |a, &b| a.min(b));
-    let max_intensity_f32 = intensity_f32.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-    
+    let max_intensity_f32 = intensity_f32
+        .iter()
+        .fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+
     // Normalize intensity to 0-255 range and convert to appropriate types
     let intensity_range = max_intensity_f32 - min_intensity_f32;
-    let intensity_scale = if intensity_range > 0.0 { 255.0 / intensity_range } else { 0.0 };
-    
+    let intensity_scale = if intensity_range > 0.0 {
+        255.0 / intensity_range
+    } else {
+        0.0
+    };
+
     for i in 0..num_points {
         x_coords.push(f16::from_f32(x_f32[i]));
         y_coords.push(f16::from_f32(y_f32[i]));
         z_coords.push(f16::from_f32(z_f32[i]));
-        
+
         // Normalize and convert intensity to u8
         let normalized_intensity = if intensity_range > 0.0 {
             ((intensity_f32[i] - min_intensity_f32) * intensity_scale).clamp(0.0, 255.0) as u8
@@ -184,7 +190,7 @@ fn parse_pcd(
         intensity: intensities,
         min_coord: glam::Vec3::new(min_x, min_y, min_z),
         max_coord: glam::Vec3::new(max_x, max_y, max_z),
-        min_intensity: 0u8, // Always 0 after normalization
+        min_intensity: 0u8,   // Always 0 after normalization
         max_intensity: 255u8, // Always 255 after normalization
     }
 }
@@ -229,52 +235,65 @@ fn load_pcd(filename: &str) -> Option<PointCloud> {
     Some(pointcloud)
 }
 
-fn load_pcd_streaming(filename: &str) {
+fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
+    println!("Loading {}\n", filename);
+    let start = std::time::Instant::now();
     let reader = match DynReader::open(filename).ok() {
         Some(r) => r,
         None => {
             println!("{} not found.", filename);
-            return;
+            return None;
         }
     };
 
     // Discover schema at runtime
     let schema = reader.meta().field_defs.fields.clone();
-    println!("Found fields: {:?}", schema.iter().map(|f| f.name.clone()).collect::<Vec<_>>());
-
-    // get positions of fields x y z intensity
     let x_index = match schema.iter().position(|f| f.name.to_lowercase() == "x") {
         Some(idx) => idx,
         None => {
             eprintln!("PCD file schema does not contain the x field.");
-            return;
+            return None;
         }
     };
     let y_index = match schema.iter().position(|f| f.name.to_lowercase() == "y") {
         Some(idx) => idx,
         None => {
             eprintln!("PCD file schema does not contain the y field.");
-            return;
+            return None;
         }
     };
     let z_index = match schema.iter().position(|f| f.name.to_lowercase() == "z") {
         Some(idx) => idx,
         None => {
             eprintln!("PCD file schema does not contain the z field.");
-            return;
+            return None;
         }
     };
     let mut has_intensity = true;
-    let intensity_index = match schema.iter().position(|f| f.name.to_lowercase() == "intensity") {
+    let intensity_index = match schema
+        .iter()
+        .position(|f| f.name.to_lowercase() == "intensity")
+    {
         Some(idx) => idx,
         None => {
-            println!("WARN: PCD file schema does not contain the intensity field. Defaulting to 0.");
+            println!(
+                "WARN: PCD file schema does not contain the intensity field. Defaulting to 0."
+            );
             has_intensity = false;
             0
         }
     };
 
-    let mut pointcloud = PointCloud::default();
+    let mut pointcloud = PointCloud {
+        x: Vec::new(),
+        y: Vec::new(),
+        z: Vec::new(),
+        intensity: Vec::new(),
+        min_coord: glam::Vec3::ZERO,
+        max_coord: glam::Vec3::ZERO,
+        min_intensity: 0u8,
+        max_intensity: 255u8,
+    };
     for record in reader {
         // Access by index~
         let point = match record {
@@ -287,42 +306,62 @@ fn load_pcd_streaming(filename: &str) {
         let field_x = &point.0[x_index];
         let field_y = &point.0[y_index];
         let field_z = &point.0[z_index];
-        let field_intensity = if has_intensity {
-            &point.0[intensity_index]
-        } else {
-            None
-        };
+        let field_intensity = &point.0[intensity_index];
 
         // Extract specific types
-        if let pcd_rs::Field::F32(values) = first_field {
-            println!("X coordinate: {}", values[0]);
+        pointcloud
+            .x
+            .push(if let pcd_rs::Field::F32(ref values) = field_x {
+                f16::from_f32(values[0])
+            } else {
+                eprintln!("Expected F32 for x field. Found different type.");
+                continue;
+            });
+        pointcloud
+            .y
+            .push(if let pcd_rs::Field::F32(ref values) = field_y {
+                f16::from_f32(values[0])
+            } else {
+                eprintln!("Expected F32 for y field. Found different type.");
+                continue;
+            });
+        pointcloud
+            .z
+            .push(if let pcd_rs::Field::F32(ref values) = field_z {
+                f16::from_f32(values[0])
+            } else {
+                eprintln!("Expected F32 for z field. Found different type.");
+                continue;
+            });
+        if has_intensity {
+            pointcloud
+                .intensity
+                .push(if let pcd_rs::Field::F32(ref values) = field_intensity {
+                    // Normalize intensity to 0-255 range
+                    let norm_intensity = (values[0].clamp(0.0, 1.0) * 255.0) as u8;
+                    norm_intensity
+                } else {
+                    0u8
+                });
+        } else {
+            pointcloud.intensity.push(0u8);
         }
-        // .get_field("x")?.as_f32()?[0];
-        // add point to cloud
-
     }
 
+    let load_time = start.elapsed().as_millis();
+    println!(
+        "[Load done, {} ms : {} points]",
+        load_time,
+        pointcloud.x.len()
+    );
+    println!(
+        "Available fields: {:?}",
+        schema.iter().map(|f| f.name.clone()).collect::<Vec<_>>()
+    );
+    println!();
+    println!();
 
-    // let reader = DynReader::open(filename).ok()?;
-    // let meta = reader.meta();
-    // // let mut pointcloud = PointCloud::default();
-
-    // for point in reader {
-    //     let point = point.ok()?;
-
-    //     // Access by index
-    //     let x = &point.0[0];
-    //     let y = &point.0[1];
-    //     let z = &point.0[2];
-    //     let intensity = &point.0[3];
-
-    //     // Extract specific types
-    //     if let Field::F32(values) = first_field {
-    //         println!("X coordinate: {}", values[0]);
-    //     }
-    // }
-
-    // Some(pointcloud)
+    Some(pointcloud)
 }
 
 fn main() {
