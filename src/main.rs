@@ -6,9 +6,9 @@ use winit::{
     event_loop::{ActiveEventLoop, EventLoop},
     window::{Window, WindowId},
 };
-mod renderer;
 mod camera;
 mod camera_controller;
+mod renderer;
 use renderer::Renderer;
 
 struct App {
@@ -218,9 +218,18 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         pointcloud.z.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
     ];
     pointcloud.max_coord = [
-        pointcloud.x.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-        pointcloud.y.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-        pointcloud.z.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
+        pointcloud
+            .x
+            .iter()
+            .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
+        pointcloud
+            .y
+            .iter()
+            .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
+        pointcloud
+            .z
+            .iter()
+            .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
     ];
 
     // Calculate 3D size (extent) of the point cloud
@@ -235,7 +244,9 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         let (min_intensity, max_intensity) = pointcloud
             .intensity
             .iter()
-            .fold((u8::MAX, u8::MIN), |(min, max), &val| (min.min(val), max.max(val)));
+            .fold((u8::MAX, u8::MIN), |(min, max), &val| {
+                (min.min(val), max.max(val))
+            });
         pointcloud.intensity = pointcloud
             .intensity
             .iter()

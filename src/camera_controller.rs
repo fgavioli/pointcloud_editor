@@ -9,7 +9,6 @@ const UP: glam::Vec3 = glam::Vec3::Z;
 const INITIAL_THETA: f32 = 0.0_f32.to_radians();
 const INITIAL_PHI: f32 = -89.0_f32.to_radians();
 
-
 // ============================================================================
 // CAMERA SYSTEM
 // ============================================================================
@@ -148,7 +147,10 @@ impl CameraController {
             let delta = new_pos - self.input.last_mouse_pos;
             self.theta -= delta.x * self.sensitivity;
             self.phi -= delta.y * self.sensitivity;
-            self.phi = self.phi.clamp(-std::f32::consts::FRAC_PI_2 + 0.1, std::f32::consts::FRAC_PI_2 - 0.1);
+            self.phi = self.phi.clamp(
+                -std::f32::consts::FRAC_PI_2 + 0.1,
+                std::f32::consts::FRAC_PI_2 - 0.1,
+            );
             self.input.last_mouse_pos = new_pos;
             true
         } else if self.input.is_right_mouse_pressed {
@@ -161,19 +163,19 @@ impl CameraController {
         } else if self.input.is_middle_mouse_pressed {
             // Middle mouse: pan target (RViz-style)
             let delta = new_pos - self.input.last_mouse_pos;
-            
+
             // Calculate camera vectors for target panning
             let camera_vectors = self.calculate_camera_vectors();
-            
+
             // Scale the panning based on distance (closer = smaller movements, farther = larger movements)
             let pan_scale = self.distance * 0.001;
-            
-            // Move target: 
+
+            // Move target:
             // - Mouse right = view pans right (target moves left relative to camera)
             // - Mouse up = view pans up (target moves down relative to camera)
             let right_movement = camera_vectors.right * (-delta.x * pan_scale);
             let up_movement = camera_vectors.up * (delta.y * pan_scale);
-            
+
             self.target += right_movement + up_movement;
             self.input.last_mouse_pos = new_pos;
             true
@@ -194,9 +196,15 @@ impl CameraController {
 
     pub fn process_events(&mut self, event: &WindowEvent) -> bool {
         match event {
-            WindowEvent::KeyboardInput { event: KeyEvent { logical_key: key, state, .. }, .. } => {
-                self.handle_keyboard_input(key, *state == ElementState::Pressed)
-            }
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key: key,
+                        state,
+                        ..
+                    },
+                ..
+            } => self.handle_keyboard_input(key, *state == ElementState::Pressed),
             WindowEvent::MouseInput { state, button, .. } => {
                 self.handle_mouse_input(*state, *button)
             }
@@ -226,10 +234,18 @@ impl CameraController {
         let camera_vectors = self.calculate_camera_vectors();
         let mut target_movement = glam::Vec3::ZERO;
 
-        if self.input.is_right_pressed { target_movement -= camera_vectors.right; }
-        if self.input.is_left_pressed { target_movement += camera_vectors.right; }
-        if self.input.is_pan_up_pressed { target_movement += camera_vectors.up; }
-        if self.input.is_pan_down_pressed { target_movement -= camera_vectors.up; }
+        if self.input.is_right_pressed {
+            target_movement -= camera_vectors.right;
+        }
+        if self.input.is_left_pressed {
+            target_movement += camera_vectors.right;
+        }
+        if self.input.is_pan_up_pressed {
+            target_movement += camera_vectors.up;
+        }
+        if self.input.is_pan_down_pressed {
+            target_movement -= camera_vectors.up;
+        }
 
         self.target += target_movement * self.speed * dt;
     }
@@ -240,7 +256,8 @@ impl CameraController {
             -self.phi.sin() * self.theta.sin(),
             self.phi.sin() * self.theta.cos(),
             self.phi.cos(),
-        ).normalize();
+        )
+        .normalize();
         CameraVectors { right, up }
     }
 
