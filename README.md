@@ -1,8 +1,8 @@
 # Pointcloud Editor
-Pointcloud editor is a performance-oriented visualizer and editor of pointcloud (`pcd`) files.
+Pointcloud editor is a performance-oriented visualizer and editor of large pointcloud (`pcd`) files.
 
 ## Functionalities
-Viz, rotate, crop
+Viz, rotate, crop.
 
 ## Commands
 Pointcloud editor handles camera movements in orbit mode, with commands mapped similarly to `rviz`.

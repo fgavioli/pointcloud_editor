@@ -47,11 +47,7 @@ impl OrbitCamera {
 
     pub fn get_vp_matrix(&self) -> glam::Mat4 {
         let view = glam::Mat4::look_at_rh(self.eye, self.target, UP);
-        
-        // For now, use standard projection with adjusted aspect ratio
-        // TODO: Implement proper asymmetric projection later
         let proj = glam::Mat4::perspective_rh(self.fov, self.aspect, self.znear, self.zfar);
-        
         proj * view
     }
 

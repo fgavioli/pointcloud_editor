@@ -1,5 +1,5 @@
 use pcd_rs::DynReader;
-use std::{env, sync::Arc};
+use std::{env, io::Write, sync::Arc};
 use winit::{
     application::ApplicationHandler,
     event::*,
@@ -41,7 +41,7 @@ impl ApplicationHandler for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         let window_attributes = Window::default_attributes()
             .with_title("Point Cloud Editor")
-            .with_inner_size(winit::dpi::LogicalSize::new(1024, 768));
+            .with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         let renderer = pollster::block_on(Renderer::new(window.clone(), &self.pointcloud));
@@ -112,6 +112,12 @@ impl ApplicationHandler for App {
                             self.gui_state
                                 .update_camera_info(position, target, distance);
 
+                            // Update GUI state with point cloud bounds
+                            self.gui_state.update_pointcloud_bounds(
+                                glam::Vec3::from(self.pointcloud.min_coord),
+                                glam::Vec3::from(self.pointcloud.max_coord),
+                            );
+
                             let raw_input = egui_state.take_egui_input(&**window);
                             let full_output = egui_ctx.run(raw_input, |ctx| {
                                 self.gui_state.render(ctx);
@@ -120,6 +126,18 @@ impl ApplicationHandler for App {
                             // Update camera controller with actual GUI panel width
                             let actual_gui_width = self.gui_state.get_actual_panel_width();
                             renderer.update_gui_width(actual_gui_width);
+
+                            // Update renderer flags based on GUI state
+                            renderer.update_render_flags(
+                                self.gui_state.show_axes,
+                                self.gui_state.show_target_disc,
+                            );
+
+                            // Update crop bounds based on GUI state
+                            renderer.update_crop_bounds(
+                                self.gui_state.crop_min,
+                                self.gui_state.crop_max,
+                            );
 
                             // Initialize egui renderer if needed
                             if self.egui_renderer.is_none() {
@@ -180,7 +198,6 @@ struct PointCloud {
 }
 
 fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
-    println!("Loading {}\n", filename);
     let start = std::time::Instant::now();
     let reader = match DynReader::open(filename).ok() {
         Some(r) => r,
@@ -190,6 +207,8 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         }
     };
 
+    // Check if we can get the total number of points from metadata
+    let total_points = reader.meta().width * reader.meta().height;
     // Discover schema at runtime
     let schema = reader.meta().field_defs.fields.clone();
     let x_index = match schema.iter().position(|f| f.name.to_lowercase() == "x") {
@@ -239,6 +258,20 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         min_intensity: 0u8,
         max_intensity: 255u8,
     };
+
+    // Progress tracking variables
+    let mut points_loaded = 0usize;
+    let update_interval = (total_points as usize) / 100;
+    let mut last_progress_update = std::time::Instant::now();
+
+    // Print initial progress bar
+    print!("Loading {}: [", filename);
+    for _ in 0..25 {
+        print!(" ");
+    }
+    print!("] 0%\r");
+    std::io::stdout().flush().unwrap();
+
     for record in reader {
         // Access by index~
         let point = match record {
@@ -290,7 +323,39 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         } else {
             pointcloud.intensity.push(0u8);
         }
+
+        // Update progress tracking
+        points_loaded += 1;
+
+        // Update progress bar periodically
+        if points_loaded % update_interval == 0 || last_progress_update.elapsed().as_millis() > 100
+        {
+            let progress_percent = ((points_loaded as f64 / total_points as f64) * 100.0) as usize;
+            let progress_percent = progress_percent.min(100);
+            let filled_bars = (progress_percent * 25) / 100;
+
+            print!("Loading {}: [", filename);
+            for i in 0..25 {
+                if i < filled_bars {
+                    print!("=");
+                } else if i == filled_bars {
+                    print!(">");
+                } else {
+                    print!(" ");
+                }
+            }
+            print!("] {}% ({} points)\r", progress_percent, points_loaded);
+            std::io::stdout().flush().unwrap();
+            last_progress_update = std::time::Instant::now();
+        }
     }
+
+    // Clear the progress line
+    print!("\r");
+    for _ in 0..80 {
+        print!(" ");
+    }
+    print!("\r");
 
     // Compute bounding box
     pointcloud.min_coord = [

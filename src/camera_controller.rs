@@ -61,7 +61,7 @@ pub struct CameraController {
     pub distance: f32,      // Distance from the target
     pub theta: f32,         // Horizontal angle (yaw)
     pub phi: f32,           // Vertical angle (pitch)
-    
+
     // Window and GUI layout tracking
     window_size: glam::Vec2,
     gui_width: f32,
@@ -79,7 +79,7 @@ impl CameraController {
             theta: INITIAL_THETA,
             phi: INITIAL_PHI,
             window_size: glam::Vec2::new(1024.0, 768.0), // Default window size
-            gui_width: 300.0, // Default GUI panel width
+            gui_width: 300.0,                            // Default GUI panel width
         }
     }
 
@@ -92,10 +92,12 @@ impl CameraController {
     // Check if a mouse position is within the 3D render area (not GUI area)
     fn is_in_render_area(&self, mouse_pos: glam::Vec2) -> bool {
         const PANEL_RESIZE_PADDING: f32 = 20.0; // Padding in pixels to avoid accidental camera movement
-        
+
         let render_area_width = self.window_size.x - self.gui_width - PANEL_RESIZE_PADDING;
-        mouse_pos.x >= 0.0 && mouse_pos.x < render_area_width && 
-        mouse_pos.y >= 0.0 && mouse_pos.y < self.window_size.y
+        mouse_pos.x >= 0.0
+            && mouse_pos.x < render_area_width
+            && mouse_pos.y >= 0.0
+            && mouse_pos.y < self.window_size.y
     }
 
     // keyboard input handler
@@ -147,17 +149,18 @@ impl CameraController {
 
     fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) -> bool {
         let is_pressed = state == ElementState::Pressed;
-        
+
         // When mouse is pressed, check if it's in the render area
         if is_pressed {
-            self.input.mouse_started_in_render_area = self.is_in_render_area(self.input.last_mouse_pos);
+            self.input.mouse_started_in_render_area =
+                self.is_in_render_area(self.input.last_mouse_pos);
         }
-        
+
         // Only process mouse input if it started in the render area
         if !self.input.mouse_started_in_render_area && is_pressed {
             return false;
         }
-        
+
         match button {
             MouseButton::Left => {
                 self.input.is_mouse_pressed = is_pressed;
@@ -181,7 +184,7 @@ impl CameraController {
             self.input.last_mouse_pos = new_pos;
             return false;
         }
-        
+
         if self.input.is_mouse_pressed {
             // Left mouse: orbit camera around target
             let delta = new_pos - self.input.last_mouse_pos;

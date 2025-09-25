@@ -35,6 +35,26 @@ impl Vertex {
     }
 }
 
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct CropUniform {
+    pub min_bounds: [f32; 3],
+    pub _padding1: f32, // Padding for 16-byte alignment
+    pub max_bounds: [f32; 3],
+    pub _padding2: f32, // Padding for 16-byte alignment
+}
+
+impl CropUniform {
+    pub fn new(min_bounds: glam::Vec3, max_bounds: glam::Vec3) -> Self {
+        Self {
+            min_bounds: min_bounds.to_array(),
+            _padding1: 0.0,
+            max_bounds: max_bounds.to_array(),
+            _padding2: 0.0,
+        }
+    }
+}
+
 // ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
@@ -148,6 +168,12 @@ pub struct Renderer {
     vp_mat: [[f32; 4]; 4],
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    // Crop uniform
+    crop_buffer: wgpu::Buffer,
+    crop_bind_group: wgpu::BindGroup,
+    // Rendering flags
+    show_axes: bool,
+    show_target_disc: bool,
     last_render_time: std::time::Instant,
     window: std::sync::Arc<Window>,
     z_far: f32,
@@ -190,9 +216,27 @@ impl Renderer {
         let gui_width = 350.0; // Fixed GUI panel width
         camera_controller.update_layout(window_size, gui_width);
 
+        // Calculate initial crop bounds from pointcloud
+        let mut crop_min = glam::Vec3::new(f32::MAX, f32::MAX, f32::MAX);
+        let mut crop_max = glam::Vec3::new(f32::MIN, f32::MIN, f32::MIN);
+        
+        for i in 0..pointcloud.x.len() {
+            let x = pointcloud.x[i];
+            let y = pointcloud.y[i]; 
+            let z = pointcloud.z[i];
+            
+            crop_min.x = crop_min.x.min(x);
+            crop_min.y = crop_min.y.min(y);
+            crop_min.z = crop_min.z.min(z);
+            
+            crop_max.x = crop_max.x.max(x);
+            crop_max.y = crop_max.y.max(y);
+            crop_max.z = crop_max.z.max(z);
+        }
+
         // Setup camera uniforms
-        let (vp_mat, camera_buffer, camera_bind_group, camera_bind_group_layout) =
-            Self::setup_camera_uniforms(&device, &camera);
+        let (vp_mat, camera_buffer, camera_bind_group, camera_bind_group_layout, crop_buffer, crop_bind_group) =
+            Self::setup_camera_uniforms(&device, &camera, crop_min, crop_max);
 
         // Create vertex data and buffers
         let vertices = Self::create_vertices_from_pointcloud(pointcloud);
@@ -245,6 +289,11 @@ impl Renderer {
             vp_mat,
             camera_buffer,
             camera_bind_group,
+            crop_buffer,
+            crop_bind_group,
+            // Initialize rendering flags to true (show by default)
+            show_axes: true,
+            show_target_disc: true,
             last_render_time: std::time::Instant::now(),
             window,
             z_far,
@@ -338,11 +387,15 @@ impl Renderer {
     fn setup_camera_uniforms(
         device: &wgpu::Device,
         camera: &OrbitCamera,
+        crop_min: glam::Vec3,
+        crop_max: glam::Vec3,
     ) -> (
         [[f32; 4]; 4],
         wgpu::Buffer,
         wgpu::BindGroup,
         wgpu::BindGroupLayout,
+        wgpu::Buffer,
+        wgpu::BindGroup,
     ) {
         let vp_mat = camera.get_vp_matrix().to_cols_array_2d();
 
@@ -352,35 +405,77 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let camera_bind_group_layout =
+        let crop_uniform = CropUniform::new(crop_min, crop_max);
+        let crop_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Crop Buffer"),
+            contents: bytemuck::cast_slice(&[crop_uniform]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
                     },
-                    count: None,
-                }],
-                label: Some("camera_bind_group_layout"),
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+                label: Some("bind_group_layout"),
             });
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &camera_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: camera_buffer.as_entire_binding(),
-            }],
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: crop_buffer.as_entire_binding(),
+                },
+            ],
             label: Some("camera_bind_group"),
+        });
+
+        let crop_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: camera_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: crop_buffer.as_entire_binding(),
+                },
+            ],
+            label: Some("crop_bind_group"),
         });
 
         (
             vp_mat,
             camera_buffer,
             camera_bind_group,
-            camera_bind_group_layout,
+            bind_group_layout,
+            crop_buffer,
+            crop_bind_group,
         )
     }
 
@@ -459,7 +554,7 @@ impl Renderer {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
@@ -574,6 +669,20 @@ impl Renderer {
         self.camera_controller.process_events(event)
     }
 
+    pub fn update_render_flags(&mut self, show_axes: bool, show_target_disc: bool) {
+        self.show_axes = show_axes;
+        self.show_target_disc = show_target_disc;
+    }
+
+    pub fn update_crop_bounds(&mut self, crop_min: glam::Vec3, crop_max: glam::Vec3) {
+        let crop_uniform = CropUniform::new(crop_min, crop_max);
+        self.queue.write_buffer(
+            &self.crop_buffer,
+            0,
+            bytemuck::cast_slice(&[crop_uniform])
+        );
+    }
+
     pub fn update(&mut self) {
         let dt = self.last_render_time.elapsed();
         self.last_render_time = std::time::Instant::now();
@@ -630,7 +739,7 @@ impl Renderer {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.crop_bind_group, &[]);
 
             // Render point cloud
             for (buffer, &count) in self.vertex_buffers.iter().zip(&self.vertex_counts) {
@@ -639,14 +748,20 @@ impl Renderer {
             }
 
             // Render coordinate axes
-            render_pass.set_pipeline(&self.line_render_pipeline);
-            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
-            render_pass.draw(0..self.axis_vertex_count, 0..1);
+            if self.show_axes {
+                render_pass.set_pipeline(&self.line_render_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
+                render_pass.draw(0..self.axis_vertex_count, 0..1);
+            }
 
             // Render target disc
-            render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
-            render_pass.draw(0..self.target_disc_vertex_count, 0..1);
+            if self.show_target_disc {
+                render_pass.set_pipeline(&self.line_render_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
+                render_pass.draw(0..self.target_disc_vertex_count, 0..1);
+            }
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -695,7 +810,7 @@ impl Renderer {
             });
 
             render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            render_pass.set_bind_group(0, &self.crop_bind_group, &[]);
 
             // Render point cloud
             for (buffer, &count) in self.vertex_buffers.iter().zip(&self.vertex_counts) {
@@ -704,14 +819,20 @@ impl Renderer {
             }
 
             // Render coordinate axes
-            render_pass.set_pipeline(&self.line_render_pipeline);
-            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
-            render_pass.draw(0..self.axis_vertex_count, 0..1);
+            if self.show_axes {
+                render_pass.set_pipeline(&self.line_render_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
+                render_pass.draw(0..self.axis_vertex_count, 0..1);
+            }
 
             // Render target disc
-            render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
-            render_pass.draw(0..self.target_disc_vertex_count, 0..1);
+            if self.show_target_disc {
+                render_pass.set_pipeline(&self.line_render_pipeline);
+                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+                render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
+                render_pass.draw(0..self.target_disc_vertex_count, 0..1);
+            }
         }
 
         // Process egui textures (but skip rendering for now)

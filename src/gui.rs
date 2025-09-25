@@ -2,11 +2,16 @@ use egui::{Context, SidePanel};
 
 #[derive(Default)]
 pub struct GuiState {
-    pub point_size: f32,
     pub show_axes: bool,
     pub show_target_disc: bool,
     pub background_color: [f32; 3],
     pub camera_info: CameraInfo,
+    // Point cloud cropping
+    pub crop_min: glam::Vec3, // minimum bounds
+    pub crop_max: glam::Vec3, // maximum bounds
+    // Point cloud bounds (updated from the loaded point cloud)
+    pub pointcloud_min: glam::Vec3,
+    pub pointcloud_max: glam::Vec3,
 }
 
 #[derive(Default)]
@@ -19,11 +24,16 @@ pub struct CameraInfo {
 impl GuiState {
     pub fn new() -> Self {
         Self {
-            point_size: 1.0,
             show_axes: true,
             show_target_disc: true,
             background_color: [0.0, 0.0, 0.0], // Black background
             camera_info: CameraInfo::default(),
+            // Initialize cropping to wide ranges (will be updated based on point cloud bounds)
+            crop_min: glam::Vec3::new(-100.0, -100.0, -100.0),
+            crop_max: glam::Vec3::new(100.0, 100.0, 100.0),
+            // Initialize point cloud bounds to default values
+            pointcloud_min: glam::Vec3::new(-100.0, -100.0, -100.0),
+            pointcloud_max: glam::Vec3::new(100.0, 100.0, 100.0),
         }
     }
 
@@ -31,6 +41,18 @@ impl GuiState {
         self.camera_info.position = position;
         self.camera_info.target = target;
         self.camera_info.distance = distance;
+    }
+
+    pub fn update_pointcloud_bounds(&mut self, min_coords: glam::Vec3, max_coords: glam::Vec3) {
+        self.pointcloud_min = min_coords;
+        self.pointcloud_max = max_coords;
+        // Initialize crop bounds to full range on first update
+        let default_min = glam::Vec3::new(-100.0, -100.0, -100.0);
+        let default_max = glam::Vec3::new(100.0, 100.0, 100.0);
+        if self.crop_min == default_min && self.crop_max == default_max {
+            self.crop_min = min_coords;
+            self.crop_max = max_coords;
+        }
     }
 
     pub fn render(&mut self, ctx: &Context) {
@@ -42,28 +64,105 @@ impl GuiState {
 
                 ui.separator();
 
-                ui.collapsing("Rendering", |ui| {
-                    ui.add(egui::Slider::new(&mut self.point_size, 0.1..=10.0).text("Point Size"));
-
+                ui.collapsing("Display", |ui| {
                     ui.checkbox(&mut self.show_axes, "Show Coordinate Axes");
-                    ui.checkbox(&mut self.show_target_disc, "Show Target Disc");
-
-                    ui.label("Background Color:");
-                    ui.color_edit_button_rgb(&mut self.background_color);
+                    ui.checkbox(&mut self.show_target_disc, "Show Target Position");
+                    // ui.label("Background Color:");
+                    // ui.color_edit_button_rgb(&mut self.background_color);
                 });
 
                 ui.separator();
 
-                ui.collapsing("Camera", |ui| {
-                    ui.label("Camera Controls:");
-                    ui.label("• Left Mouse: Orbit camera");
-                    ui.label("• Right Mouse: Zoom");
-                    ui.label("• Middle Mouse: Pan target");
-                    ui.label("• Mouse Wheel: Zoom");
+                ui.collapsing("Point Cloud Cropping", |ui| {
+                    ui.label("X Axis:");
+                    ui.add(
+                        egui::Slider::new(
+                            &mut self.crop_min.x,
+                            self.pointcloud_min.x..=self.pointcloud_max.x,
+                        )
+                        .text("Min X"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut self.crop_max.x,
+                            self.pointcloud_min.x..=self.pointcloud_max.x,
+                        )
+                        .text("Max X"),
+                    );
+
+                    ui.label("Y Axis:");
+                    ui.add(
+                        egui::Slider::new(
+                            &mut self.crop_min.y,
+                            self.pointcloud_min.y..=self.pointcloud_max.y,
+                        )
+                        .text("Min Y"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut self.crop_max.y,
+                            self.pointcloud_min.y..=self.pointcloud_max.y,
+                        )
+                        .text("Max Y"),
+                    );
+
+                    ui.label("Z Axis:");
+                    ui.add(
+                        egui::Slider::new(
+                            &mut self.crop_min.z,
+                            self.pointcloud_min.z..=self.pointcloud_max.z,
+                        )
+                        .text("Min Z"),
+                    );
+                    ui.add(
+                        egui::Slider::new(
+                            &mut self.crop_max.z,
+                            self.pointcloud_min.z..=self.pointcloud_max.z,
+                        )
+                        .text("Max Z"),
+                    );
+
+                    // Add a reset button
+                    if ui.button("Reset to Full Range").clicked() {
+                        self.crop_min = self.pointcloud_min;
+                        self.crop_max = self.pointcloud_max;
+                    }
+                });
+
+                ui.separator();
+
+                // ui.collapsing("File Operations", |ui| {
+                //     if ui.button("Open Point Cloud...").clicked() {
+                //         // TODO: Implement file dialog
+                //         println!("Open file dialog would appear here");
+                //     }
+
+                //     if ui.button("Export View...").clicked() {
+                //         // TODO: Implement export functionality
+                //         println!("Export functionality would be here");
+                //     }
+                // });
+                // ui.separator();
+
+                // Bottom panel
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    ui.label("Point Cloud Editor v0.1.0");
 
                     ui.separator();
 
-                    ui.label("Camera Information:");
+                    ui.horizontal(|ui| {
+                        ui.label("Distance:");
+                        ui.label(format!("{:.1}", self.camera_info.distance));
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Target:");
+                        ui.label(format!(
+                            "({:.1}, {:.1}, {:.1})",
+                            self.camera_info.target[0],
+                            self.camera_info.target[1],
+                            self.camera_info.target[2]
+                        ));
+                    });
                     ui.horizontal(|ui| {
                         ui.label("Position:");
                         ui.label(format!(
@@ -74,41 +173,16 @@ impl GuiState {
                         ));
                     });
 
-                    ui.horizontal(|ui| {
-                        ui.label("Target:");
-                        ui.label(format!(
-                            "({:.1}, {:.1}, {:.1})",
-                            self.camera_info.target[0],
-                            self.camera_info.target[1],
-                            self.camera_info.target[2]
-                        ));
-                    });
+                    ui.label("Camera Info:");
 
-                    ui.horizontal(|ui| {
-                        ui.label("Distance:");
-                        ui.label(format!("{:.1}", self.camera_info.distance));
-                    });
-                });
+                    ui.separator();
 
-                ui.separator();
+                    ui.label("• Middle Mouse: Move target");
+                    ui.label("• Right Mouse / Mouse Wheel: Zoom");
+                    ui.label("• Left Mouse: Orbit camera");
+                    ui.label("\nCamera Controls:");
 
-                ui.collapsing("File Operations", |ui| {
-                    if ui.button("Open Point Cloud...").clicked() {
-                        // TODO: Implement file dialog
-                        println!("Open file dialog would appear here");
-                    }
-
-                    if ui.button("Export View...").clicked() {
-                        // TODO: Implement export functionality
-                        println!("Export functionality would be here");
-                    }
-                });
-
-                ui.separator();
-
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.label("Point Cloud Editor v0.1.0");
-                    ui.label("Use mouse to navigate the 3D view");
+                    ui.separator();
                 });
             });
     }
