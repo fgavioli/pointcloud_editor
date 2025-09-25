@@ -63,15 +63,42 @@ fn create_axis_vertices(axis_length: f32) -> Vec<Vertex> {
         // X-axis (Red)
         Vertex { position: [0.0, 0.0, 0.0], color: [1.0, 0.0, 0.0] },
         Vertex { position: [axis_length, 0.0, 0.0], color: [1.0, 0.0, 0.0] },
-        
-        // Y-axis (Green)  
+
+        // Y-axis (Green)
         Vertex { position: [0.0, 0.0, 0.0], color: [0.0, 1.0, 0.0] },
         Vertex { position: [0.0, axis_length, 0.0], color: [0.0, 1.0, 0.0] },
-        
+
         // Z-axis (Blue)
         Vertex { position: [0.0, 0.0, 0.0], color: [0.0, 0.0, 1.0] },
         Vertex { position: [0.0, 0.0, axis_length], color: [0.0, 0.0, 1.0] },
     ]
+}
+
+fn create_target_disc_vertices(radius: f32, segments: u32) -> Vec<Vertex> {
+    let mut vertices = Vec::new();
+    let center = [0.0, 0.0, 0.0];
+    let color = [0.0, 0.0, 8.0]; // Blue color for the target disc
+
+    // Create disc as a series of lines from center to edge points
+    for i in 0..segments {
+        let angle = 2.0 * std::f32::consts::PI * i as f32 / segments as f32;
+        let x = radius * angle.cos();
+        let y = radius * angle.sin();
+
+        // Line from center to edge
+        vertices.push(Vertex { position: center, color });
+        vertices.push(Vertex { position: [x, y, 0.0], color });
+
+        // Line to next point (creating the outer ring)
+        let next_angle = 2.0 * std::f32::consts::PI * ((i + 1) % segments) as f32 / segments as f32;
+        let next_x = radius * next_angle.cos();
+        let next_y = radius * next_angle.sin();
+
+        vertices.push(Vertex { position: [x, y, 0.0], color });
+        vertices.push(Vertex { position: [next_x, next_y, 0.0], color });
+    }
+
+    vertices
 }
 
 pub struct Renderer {
@@ -87,6 +114,10 @@ pub struct Renderer {
     // Axis rendering
     axis_vertex_buffer: wgpu::Buffer,
     axis_vertex_count: u32,
+    // Target disc rendering
+    target_disc_vertex_buffer: wgpu::Buffer,
+    target_disc_vertex_count: u32,
+    target_disc_vertices: Vec<Vertex>, // Keep original vertices for transformation
     camera: OrbitCamera,
     camera_controller: CameraController,
     vp_mat: [[f32; 4]; 4],
@@ -137,8 +168,7 @@ impl Renderer {
         let (vertex_buffers, vertex_counts) = Self::create_vertex_buffers(&device, vertices);
 
         // Create axis vertices and buffer
-        let max_extent = pointcloud.size.x.max(pointcloud.size.y).max(pointcloud.size.z);
-        let axis_length = max_extent * 0.2; // Axes are 20% of the model size
+        let axis_length = 2.0; // Axes are 2m long
         let axis_vertices = create_axis_vertices(axis_length);
         let axis_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Axis Vertex Buffer"),
@@ -146,6 +176,16 @@ impl Renderer {
             usage: wgpu::BufferUsages::VERTEX,
         });
         let axis_vertex_count = axis_vertices.len() as u32;
+
+        // Create target disc vertices and buffer
+        let disc_radius = 0.5; // Disc radius is 0.5m
+        let target_disc_vertices = create_target_disc_vertices(disc_radius, 4);
+        let target_disc_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Target Disc Vertex Buffer"),
+            contents: bytemuck::cast_slice(&target_disc_vertices),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, // Allow updates
+        });
+        let target_disc_vertex_count = target_disc_vertices.len() as u32;
 
         // Create render pipeline
         let render_pipeline = Self::create_render_pipeline(&device, &config, &camera_bind_group_layout);
@@ -163,6 +203,9 @@ impl Renderer {
             vertex_counts,
             axis_vertex_buffer,
             axis_vertex_count,
+            target_disc_vertex_buffer,
+            target_disc_vertex_count,
+            target_disc_vertices,
             camera,
             camera_controller,
             vp_mat,
@@ -172,6 +215,28 @@ impl Renderer {
             window,
             z_far,
         }
+    }
+
+    fn update_target_disc(&mut self) {
+        // Transform the disc vertices to the current target position
+        let target_pos = self.camera_controller.target;
+        let mut transformed_vertices = Vec::new();
+        
+        for vertex in &self.target_disc_vertices {
+            let mut new_vertex = *vertex;
+            // Translate the disc to the target position
+            new_vertex.position[0] += target_pos.x;
+            new_vertex.position[1] += target_pos.y;
+            new_vertex.position[2] += target_pos.z;
+            transformed_vertices.push(new_vertex);
+        }
+        
+        // Update the buffer with the new positions
+        self.queue.write_buffer(
+            &self.target_disc_vertex_buffer,
+            0,
+            bytemuck::cast_slice(&transformed_vertices),
+        );
     }
 
     // WGPU Initialization
@@ -449,6 +514,7 @@ impl Renderer {
 
         self.update_fps_counter(dt);
         self.camera_controller.update(&mut self.camera, dt);
+        self.update_target_disc(); // Update disc position based on camera target
         self.vp_mat = self
             .camera
             .get_vp_matrix()
@@ -488,9 +554,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.1,
-                            g: 0.1,
-                            b: 0.2,
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
                             a: 1.0,
                         }),
                         store: wgpu::StoreOp::Store,
@@ -515,6 +581,10 @@ impl Renderer {
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
             render_pass.draw(0..self.axis_vertex_count, 0..1);
+
+            // Render target disc
+            render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
+            render_pass.draw(0..self.target_disc_vertex_count, 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));

@@ -241,7 +241,6 @@ impl CameraController {
             self.phi.sin() * self.theta.cos(),
             self.phi.cos(),
         ).normalize();
-        println!("Up vector: {:?}", up);
         CameraVectors { right, up }
     }
 
