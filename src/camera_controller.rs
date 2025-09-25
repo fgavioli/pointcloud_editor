@@ -235,26 +235,11 @@ impl CameraController {
     }
 
     fn calculate_camera_vectors(&self) -> CameraVectors {
-        // Calculate camera's local coordinate system for screen-space panning
-        
-        // Right vector: horizontal direction perpendicular to camera yaw (rotated 90 degrees)
         let right = glam::Vec3::new(-self.theta.cos(), -self.theta.sin(), 0.0).normalize();
-        
-        // Up vector: should be perpendicular to right and properly account for pitch
-        // Since right = (-cos(theta), -sin(theta), 0), we can derive up from it
-        // The up vector should be in the plane defined by the right vector and world up (Z)
-        // and should represent screen-space "up" direction
-        
-        // For screen-space up, we want a vector that:
-        // 1. Is perpendicular to the right vector
-        // 2. Points in the direction that appears "up" on screen given current pitch
-        // 3. When pitch = 0 (horizontal), should be world up (0, 0, 1)
-        // 4. When pitch changes, should tilt accordingly
-
         let up = glam::Vec3::new(
-            -self.phi.sin() * self.theta.sin(),  // Y component based on yaw and pitch  
-            self.phi.sin() * self.theta.cos(),   // X component based on yaw and pitch
-            self.phi.cos(),                      // Z component based on pitch
+            -self.phi.sin() * self.theta.sin(),
+            self.phi.sin() * self.theta.cos(),
+            self.phi.cos(),
         ).normalize();
         println!("Up vector: {:?}", up);
         CameraVectors { right, up }
