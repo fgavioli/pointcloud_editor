@@ -72,7 +72,6 @@ pub struct Renderer {
     vp_mat: [[f32; 4]; 4],
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    camera_bind_group_layout: wgpu::BindGroupLayout,
     last_render_time: std::time::Instant,
     window: std::sync::Arc<Window>,
     z_far: f32,
@@ -134,7 +133,6 @@ impl Renderer {
             vp_mat,
             camera_buffer,
             camera_bind_group,
-            camera_bind_group_layout,
             last_render_time: std::time::Instant::now(),
             window,
             z_far,
@@ -337,11 +335,6 @@ impl Renderer {
         })
     }
 
-    // Public Interface
-    pub fn window(&self) -> &Window {
-        &self.window
-    }
-
     // window resize callback
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
@@ -366,9 +359,7 @@ impl Renderer {
         let dt = self.last_render_time.elapsed();
         self.last_render_time = std::time::Instant::now();
 
-        // Track FPS and render latency
         self.update_fps_counter(dt);
-
         self.camera_controller.update(&mut self.camera, dt);
         self.vp_mat = self
             .camera
@@ -384,7 +375,6 @@ impl Renderer {
     fn update_fps_counter(&mut self, frame_time: std::time::Duration) {
         let frame_time_ms = frame_time.as_secs_f32() * 1000.0;
         let fps = 1.0 / frame_time.as_secs_f32();
-        // Update window title with FPS info
         let title = format!("Point Cloud Editor | {:.0} FPS | Frametime: {:.2}ms",
                             fps, frame_time_ms);
         self.window.set_title(&title);

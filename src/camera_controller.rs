@@ -6,7 +6,6 @@ use winit::{
 use crate::camera::OrbitCamera;
 
 const UP: glam::Vec3 = glam::Vec3::Z;
-
 const INITIAL_THETA: f32 = 0.0_f32.to_radians();
 const INITIAL_PHI: f32 = -89.0_f32.to_radians();
 
@@ -214,10 +213,9 @@ impl CameraController {
             self.theta.sin() * self.phi.cos(),
             self.phi.sin(),
         ).normalize();
-        let right = forward.cross(glam::Vec3::Z).normalize();
-        let up = glam::Vec3::Z;
+        let right = forward.cross(UP).normalize();
 
-        CameraVectors { forward, right, up }
+        CameraVectors { right, up: UP}
     }
 
     pub fn update(&mut self, camera: &mut OrbitCamera, dt: std::time::Duration) {
@@ -229,7 +227,6 @@ impl CameraController {
 }
 
 struct CameraVectors {
-    forward: glam::Vec3,
     right: glam::Vec3,
     up: glam::Vec3,
 }
