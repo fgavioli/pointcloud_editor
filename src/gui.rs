@@ -4,7 +4,6 @@ use egui::{Context, SidePanel};
 pub struct GuiState {
     pub show_axes: bool,
     pub show_target_disc: bool,
-    pub background_color: [f32; 3],
     pub camera_info: CameraInfo,
     // Point cloud cropping
     pub crop_min: glam::Vec3, // minimum bounds
@@ -12,6 +11,9 @@ pub struct GuiState {
     // Point cloud bounds (updated from the loaded point cloud)
     pub pointcloud_min: glam::Vec3,
     pub pointcloud_max: glam::Vec3,
+    // Ground plane alignment
+    pub alignment_requested: bool,
+    pub reset_alignment_requested: bool,
 }
 
 #[derive(Default)]
@@ -26,7 +28,6 @@ impl GuiState {
         Self {
             show_axes: true,
             show_target_disc: true,
-            background_color: [0.0, 0.0, 0.0], // Black background
             camera_info: CameraInfo::default(),
             // Initialize cropping to wide ranges (will be updated based on point cloud bounds)
             crop_min: glam::Vec3::new(-100.0, -100.0, -100.0),
@@ -34,6 +35,9 @@ impl GuiState {
             // Initialize point cloud bounds to default values
             pointcloud_min: glam::Vec3::new(-100.0, -100.0, -100.0),
             pointcloud_max: glam::Vec3::new(100.0, 100.0, 100.0),
+            // Initialize alignment flags
+            alignment_requested: false,
+            reset_alignment_requested: false,
         }
     }
 
@@ -67,13 +71,23 @@ impl GuiState {
                 ui.collapsing("Display", |ui| {
                     ui.checkbox(&mut self.show_axes, "Show Coordinate Axes");
                     ui.checkbox(&mut self.show_target_disc, "Show Target Position");
-                    // ui.label("Background Color:");
-                    // ui.color_edit_button_rgb(&mut self.background_color);
                 });
 
                 ui.separator();
 
-                ui.collapsing("Point Cloud Cropping", |ui| {
+                ui.collapsing("Ground plane alignment", |ui| {
+                    ui.label("Align point cloud to ground plane:");
+                    if ui.button("Align").clicked() {
+                        self.alignment_requested = true;
+                    }
+                    if ui.button("Reset").clicked() {
+                        self.reset_alignment_requested = true;
+                    }
+                }).fully_open();
+
+                ui.separator();
+
+                ui.collapsing("Cropping", |ui| {
                     ui.label("X Axis:");
                     ui.add(
                         egui::Slider::new(
@@ -127,7 +141,7 @@ impl GuiState {
                         self.crop_min = self.pointcloud_min;
                         self.crop_max = self.pointcloud_max;
                     }
-                });
+                }).fully_open();
 
                 ui.separator();
 
@@ -146,7 +160,7 @@ impl GuiState {
 
                 // Bottom panel
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.label("Point Cloud Editor v0.1.0");
+                    // ui.label("Point Cloud Editor v0.1.0");
 
                     ui.separator();
 
@@ -180,7 +194,7 @@ impl GuiState {
                     ui.label("• Middle Mouse: Move target");
                     ui.label("• Right Mouse / Mouse Wheel: Zoom");
                     ui.label("• Left Mouse: Orbit camera");
-                    ui.label("\nCamera Controls:");
+                    ui.label("Camera Controls:");
 
                     ui.separator();
                 });
@@ -189,5 +203,25 @@ impl GuiState {
 
     pub fn get_actual_panel_width(&self) -> f32 {
         350.0 // Return fixed width
+    }
+
+    /// Check if alignment was requested and reset the flag
+    pub fn take_alignment_request(&mut self) -> bool {
+        if self.alignment_requested {
+            self.alignment_requested = false;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if reset alignment was requested and reset the flag
+    pub fn take_reset_alignment_request(&mut self) -> bool {
+        if self.reset_alignment_requested {
+            self.reset_alignment_requested = false;
+            true
+        } else {
+            false
+        }
     }
 }

@@ -14,7 +14,8 @@ use gui::GuiState;
 use renderer::Renderer;
 
 struct App {
-    pointcloud: PointCloud,
+    original_pointcloud: PointCloud, // Keep the original for reset
+    current_pointcloud: PointCloud,  // Current (potentially aligned) point cloud for rendering
     renderer: Option<Renderer>,
     window: Option<Arc<Window>>,
     gui_state: GuiState,
@@ -23,10 +24,117 @@ struct App {
     egui_renderer: Option<egui_wgpu::Renderer>,
 }
 
+/// Align point cloud to ground plane
+fn align_pointcloud_to_ground(pointcloud: &PointCloud) -> PointCloud {
+    println!("Detecting ground plane...");
+
+    // build histogram by discretizing Z values in 1m bins
+    let bin_size = 0.5; // 1 meter bins
+    let mut histogram = std::collections::HashMap::new();
+    for &z in &pointcloud.z {
+        let bin = (z / bin_size).floor() as i32;
+        *histogram.entry(bin).or_insert(0) += 1;
+    }
+    // print the ordered histogram (for debugging)
+    let mut ordered_histogram: Vec<_> = histogram.into_iter().collect();
+    ordered_histogram.sort_by_key(|&(bin, _)| bin);
+    for (bin, count) in ordered_histogram {
+        println!("Bin {} [Z={:.1}-{}]:\t{}", bin, bin as f32 * bin_size, (bin + 1) as f32 * bin_size, count);
+    }
+    // Find the bin with the maximum count
+
+
+    // println!("Ground plane detected with {} inliers ({:.1}% of points)", 
+    //          best_inlier_count, (best_inlier_count as f32 / num_points as f32) * 100.0);
+    // println!("Ground plane normal: [{:.3}, {:.3}, {:.3}]", 
+    //          ground_normal.x, ground_normal.y, ground_normal.z);
+    
+    // // Target normal (Z-up)
+    // let target_normal = glam::Vec3::new(0.0, 0.0, 1.0);
+    
+    // // Calculate rotation axis and angle
+    // let rotation_axis = ground_normal.cross(target_normal);
+    // let rotation_angle = ground_normal.dot(target_normal).acos();
+    
+    // // Handle case where normals are already aligned or opposite
+    // let rotation_matrix = if rotation_axis.length() < 1e-6 {
+    //     if ground_normal.dot(target_normal) > 0.0 {
+    //         glam::Mat3::IDENTITY // Already aligned
+    //     } else {
+    //         glam::Mat3::from_rotation_x(std::f32::consts::PI) // Flip 180 degrees
+    //     }
+    // } else {
+    //     let rotation_axis = rotation_axis.normalize();
+    //     glam::Mat3::from_axis_angle(rotation_axis, rotation_angle)
+    // };
+    
+    // println!("Applying rotation (angle: {:.2}°)", rotation_angle.to_degrees());
+    
+    // // Apply rotation to all points
+    // let mut aligned_pointcloud = PointCloud {
+    //     x: Vec::with_capacity(num_points),
+    //     y: Vec::with_capacity(num_points),
+    //     z: Vec::with_capacity(num_points),
+    //     intensity: pointcloud.intensity.clone(),
+    //     min_coord: [f32::INFINITY; 3],
+    //     max_coord: [f32::NEG_INFINITY; 3],
+    //     size: glam::Vec3::ZERO,
+    //     min_intensity: pointcloud.min_intensity,
+    //     max_intensity: pointcloud.max_intensity,
+    // };
+    
+    // // Transform all points and update bounding box
+    // for i in 0..num_points {
+    //     let original_point = glam::Vec3::new(pointcloud.x[i], pointcloud.y[i], pointcloud.z[i]);
+    //     let rotated_point = rotation_matrix * original_point;
+        
+    //     aligned_pointcloud.x.push(rotated_point.x);
+    //     aligned_pointcloud.y.push(rotated_point.y);
+    //     aligned_pointcloud.z.push(rotated_point.z);
+        
+    //     // Update bounding box
+    //     aligned_pointcloud.min_coord[0] = aligned_pointcloud.min_coord[0].min(rotated_point.x);
+    //     aligned_pointcloud.min_coord[1] = aligned_pointcloud.min_coord[1].min(rotated_point.y);
+    //     aligned_pointcloud.min_coord[2] = aligned_pointcloud.min_coord[2].min(rotated_point.z);
+        
+    //     aligned_pointcloud.max_coord[0] = aligned_pointcloud.max_coord[0].max(rotated_point.x);
+    //     aligned_pointcloud.max_coord[1] = aligned_pointcloud.max_coord[1].max(rotated_point.y);
+    //     aligned_pointcloud.max_coord[2] = aligned_pointcloud.max_coord[2].max(rotated_point.z);
+    // }
+    
+    // // Calculate 3D size
+    // aligned_pointcloud.size = glam::Vec3::new(
+    //     aligned_pointcloud.max_coord[0] - aligned_pointcloud.min_coord[0],
+    //     aligned_pointcloud.max_coord[1] - aligned_pointcloud.min_coord[1],
+    //     aligned_pointcloud.max_coord[2] - aligned_pointcloud.min_coord[2],
+    // );
+    
+    // println!("Ground plane alignment completed");
+    // println!("New bounds: min=[{:.2}, {:.2}, {:.2}], max=[{:.2}, {:.2}, {:.2}]",
+    //          aligned_pointcloud.min_coord[0], aligned_pointcloud.min_coord[1], aligned_pointcloud.min_coord[2],
+    //          aligned_pointcloud.max_coord[0], aligned_pointcloud.max_coord[1], aligned_pointcloud.max_coord[2]);
+    //
+    pointcloud.clone() // Placeholder: return original point cloud for now
+}
+
 impl App {
     fn new(pointcloud: PointCloud) -> Self {
+        // Clone the pointcloud for both original and current
+        let original_pointcloud = PointCloud {
+            x: pointcloud.x.clone(),
+            y: pointcloud.y.clone(),
+            z: pointcloud.z.clone(),
+            intensity: pointcloud.intensity.clone(),
+            min_coord: pointcloud.min_coord,
+            max_coord: pointcloud.max_coord,
+            size: pointcloud.size,
+            min_intensity: pointcloud.min_intensity,
+            max_intensity: pointcloud.max_intensity,
+        };
+
         Self {
-            pointcloud,
+            original_pointcloud,
+            current_pointcloud: pointcloud,
             renderer: None,
             window: None,
             gui_state: GuiState::new(),
@@ -44,7 +152,7 @@ impl ApplicationHandler for App {
             .with_inner_size(winit::dpi::LogicalSize::new(1280, 720));
 
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
-        let renderer = pollster::block_on(Renderer::new(window.clone(), &self.pointcloud));
+        let renderer = pollster::block_on(Renderer::new(window.clone(), &self.current_pointcloud));
 
         // Initialize egui
         let egui_ctx = egui::Context::default();
@@ -114,8 +222,8 @@ impl ApplicationHandler for App {
 
                             // Update GUI state with point cloud bounds
                             self.gui_state.update_pointcloud_bounds(
-                                glam::Vec3::from(self.pointcloud.min_coord),
-                                glam::Vec3::from(self.pointcloud.max_coord),
+                                glam::Vec3::from(self.current_pointcloud.min_coord),
+                                glam::Vec3::from(self.current_pointcloud.max_coord),
                             );
 
                             let raw_input = egui_state.take_egui_input(&**window);
@@ -138,6 +246,48 @@ impl ApplicationHandler for App {
                                 self.gui_state.crop_min,
                                 self.gui_state.crop_max,
                             );
+
+                            // Handle ground plane alignment requests
+                            if self.gui_state.take_alignment_request() {
+                                println!("Aligning point cloud to ground plane...");
+                                let aligned_pointcloud = align_pointcloud_to_ground(&self.original_pointcloud);
+                                self.current_pointcloud = aligned_pointcloud;
+                                
+                                // Update GUI bounds with the aligned point cloud
+                                self.gui_state.update_pointcloud_bounds(
+                                    glam::Vec3::from(self.current_pointcloud.min_coord),
+                                    glam::Vec3::from(self.current_pointcloud.max_coord),
+                                );
+                                
+                                // TODO: Need to recreate renderer with new point cloud data
+                                println!("Ground plane alignment completed (placeholder implementation)");
+                            }
+
+                            // Handle reset alignment requests
+                            if self.gui_state.take_reset_alignment_request() {
+                                println!("Resetting point cloud alignment...");
+                                // Reset to original point cloud
+                                self.current_pointcloud = PointCloud {
+                                    x: self.original_pointcloud.x.clone(),
+                                    y: self.original_pointcloud.y.clone(),
+                                    z: self.original_pointcloud.z.clone(),
+                                    intensity: self.original_pointcloud.intensity.clone(),
+                                    min_coord: self.original_pointcloud.min_coord,
+                                    max_coord: self.original_pointcloud.max_coord,
+                                    size: self.original_pointcloud.size,
+                                    min_intensity: self.original_pointcloud.min_intensity,
+                                    max_intensity: self.original_pointcloud.max_intensity,
+                                };
+                                
+                                // Update GUI bounds with the original point cloud
+                                self.gui_state.update_pointcloud_bounds(
+                                    glam::Vec3::from(self.current_pointcloud.min_coord),
+                                    glam::Vec3::from(self.current_pointcloud.max_coord),
+                                );
+                                
+                                // TODO: Need to recreate renderer with original point cloud data
+                                println!("Point cloud alignment reset completed");
+                            }
 
                             // Initialize egui renderer if needed
                             if self.egui_renderer.is_none() {
@@ -184,6 +334,7 @@ impl ApplicationHandler for App {
     }
 }
 
+#[derive(Clone)]
 struct PointCloud {
     // Structure of Arrays (SoA) for better memory efficiency
     x: Vec<f32>,
@@ -264,8 +415,14 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
     let update_interval = (total_points as usize) / 100;
     let mut last_progress_update = std::time::Instant::now();
 
+    println!("Opened {}.", filename);
+    println!(
+        "Available fields: {:?}",
+        schema.iter().map(|f| f.name.clone()).collect::<Vec<_>>()
+    );
+
     // Print initial progress bar
-    print!("Loading {}: [", filename);
+    print!("Loading: [");
     for _ in 0..25 {
         print!(" ");
     }
@@ -334,7 +491,7 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
             let progress_percent = progress_percent.min(100);
             let filled_bars = (progress_percent * 25) / 100;
 
-            print!("Loading {}: [", filename);
+            print!("Loading : [");
             for i in 0..25 {
                 if i < filled_bars {
                     print!("=");
@@ -409,12 +566,6 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         load_time,
         pointcloud.x.len()
     );
-    println!(
-        "Available fields: {:?}",
-        schema.iter().map(|f| f.name.clone()).collect::<Vec<_>>()
-    );
-    println!();
-    println!();
 
     Some(pointcloud)
 }
