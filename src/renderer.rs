@@ -4,7 +4,7 @@ use crate::PointCloud;
 use wgpu::util::DeviceExt;
 use winit::{event::*, window::Window};
 
-const Z_NEAR: f32 = 0.1;
+const Z_NEAR: f32 = 0.01;
 const CAMERA_FOV: f32 = 60.0_f32.to_radians();
 
 #[repr(C)]
@@ -182,8 +182,13 @@ impl Renderer {
         // plane has a width equal to the maximum horizontal size of the model.
         // d = (modelMaxHSize / (2tan(fov))) + (horizontalSize / 2)
         let initial_distance = (pointcloud.size.x / 2.0) / (camera.get_fov() / 2.0).tan();
-        let camera_controller =
+        let mut camera_controller =
             CameraController::new(max_extent * 0.1, initial_target, initial_distance);
+
+        // Set up initial layout information for camera controller
+        let window_size = glam::Vec2::new(size.width as f32, size.height as f32);
+        let gui_width = 350.0; // Fixed GUI panel width
+        camera_controller.update_layout(window_size, gui_width);
 
         // Setup camera uniforms
         let (vp_mat, camera_buffer, camera_bind_group, camera_bind_group_layout) =
@@ -278,7 +283,7 @@ impl Renderer {
         wgpu::Queue,
         wgpu::SurfaceConfiguration,
     ) {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
@@ -300,8 +305,8 @@ impl Renderer {
                     required_features: wgpu::Features::empty(),
                     required_limits: wgpu::Limits::default(),
                     memory_hints: wgpu::MemoryHints::default(),
+                    trace: wgpu::Trace::default(),
                 },
-                None,
             )
             .await
             .unwrap();
@@ -445,13 +450,13 @@ impl Renderer {
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[Vertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -498,13 +503,13 @@ impl Renderer {
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[Vertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -532,20 +537,37 @@ impl Renderer {
         })
     }
 
-    // window resize callback
+        // window resize callback
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
+
+            // Calculate aspect ratio based on drawable area (excluding fixed 350px panel)
+            const FIXED_PANEL_WIDTH: f32 = 350.0;
+            let drawable_width = new_size.width as f32 - FIXED_PANEL_WIDTH;
+            let drawable_height = new_size.height as f32;
+            let drawable_aspect = drawable_width / drawable_height;
+
             self.camera.update_proj(
                 CAMERA_FOV,
-                self.config.width as f32 / self.config.height as f32,
+                drawable_aspect,
                 Z_NEAR,
                 self.z_far,
             );
+
+            // Update camera controller layout information
+            let window_size = glam::Vec2::new(new_size.width as f32, new_size.height as f32);
+            self.camera_controller.update_layout(window_size, FIXED_PANEL_WIDTH);
         }
+    }
+
+    pub fn update_gui_width(&mut self, _gui_width: f32) {
+        // Keep this method for compatibility but don't use gui_width since it's now fixed
+        let window_size = glam::Vec2::new(self.size.width as f32, self.size.height as f32);
+        self.camera_controller.update_layout(window_size, 350.0);
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
@@ -631,5 +653,133 @@ impl Renderer {
         output.present();
 
         Ok(())
+    }
+
+    pub fn render_with_egui(
+        &mut self,
+        egui_renderer: &mut egui_wgpu::Renderer,
+        egui_ctx: &egui::Context,
+        full_output: &egui::FullOutput
+    ) -> Result<(), wgpu::SurfaceError> {
+        let output = self.surface.get_current_texture()?;
+        let view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Render Encoder"),
+            });
+
+        // First render the 3D scene
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("3D Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+
+            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+
+            // Render point cloud
+            for (buffer, &count) in self.vertex_buffers.iter().zip(&self.vertex_counts) {
+                render_pass.set_vertex_buffer(0, buffer.slice(..));
+                render_pass.draw(0..count, 0..1);
+            }
+
+            // Render coordinate axes
+            render_pass.set_pipeline(&self.line_render_pipeline);
+            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
+            render_pass.draw(0..self.axis_vertex_count, 0..1);
+
+            // Render target disc
+            render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
+            render_pass.draw(0..self.target_disc_vertex_count, 0..1);
+        }
+
+        // Process egui textures (but skip rendering for now)
+        for (id, image_delta) in &full_output.textures_delta.set {
+            egui_renderer.update_texture(&self.device, &self.queue, *id, image_delta);
+        }
+
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: full_output.pixels_per_point,
+        };
+
+        let primitives = egui_ctx.tessellate(full_output.shapes.clone(), full_output.pixels_per_point);
+
+        // Update egui buffers
+        egui_renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &primitives,
+            &screen_descriptor,
+        );
+
+        // Render egui overlay with proper lifetime handling
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("egui Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            });
+
+            // Use transmute to work around lifetime issues (unsafe but necessary)
+            let render_pass_static: &mut wgpu::RenderPass<'static> =
+                unsafe { std::mem::transmute(&mut render_pass) };
+
+            egui_renderer.render(render_pass_static, &primitives, &screen_descriptor);
+        }
+
+        let command_buffer = encoder.finish();
+
+        for id in &full_output.textures_delta.free {
+            egui_renderer.free_texture(id);
+        }
+
+        self.queue.submit(std::iter::once(command_buffer));
+        output.present();
+
+        Ok(())
+    }
+
+    pub fn get_camera(&self) -> &OrbitCamera {
+        &self.camera
+    }
+
+    pub fn get_device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub fn get_config(&self) -> &wgpu::SurfaceConfiguration {
+        &self.config
     }
 }

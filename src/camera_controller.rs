@@ -5,7 +5,6 @@ use winit::{
 
 use crate::camera::OrbitCamera;
 
-const UP: glam::Vec3 = glam::Vec3::Z;
 const INITIAL_THETA: f32 = 0.0_f32.to_radians();
 const INITIAL_PHI: f32 = -89.0_f32.to_radians();
 
@@ -26,6 +25,8 @@ struct InputState {
     is_right_mouse_pressed: bool,
     is_middle_mouse_pressed: bool,
     last_mouse_pos: glam::Vec2,
+    // Track if mouse interaction started in render area
+    mouse_started_in_render_area: bool,
 }
 
 impl Default for InputState {
@@ -41,6 +42,7 @@ impl Default for InputState {
             is_right_mouse_pressed: false,
             is_middle_mouse_pressed: false,
             last_mouse_pos: glam::Vec2::ZERO,
+            mouse_started_in_render_area: false,
         }
     }
 }
@@ -59,6 +61,10 @@ pub struct CameraController {
     pub distance: f32,      // Distance from the target
     pub theta: f32,         // Horizontal angle (yaw)
     pub phi: f32,           // Vertical angle (pitch)
+    
+    // Window and GUI layout tracking
+    window_size: glam::Vec2,
+    gui_width: f32,
 }
 
 impl CameraController {
@@ -72,7 +78,24 @@ impl CameraController {
             distance: initial_distance,
             theta: INITIAL_THETA,
             phi: INITIAL_PHI,
+            window_size: glam::Vec2::new(1024.0, 768.0), // Default window size
+            gui_width: 300.0, // Default GUI panel width
         }
+    }
+
+    // Update window size and GUI width
+    pub fn update_layout(&mut self, window_size: glam::Vec2, gui_width: f32) {
+        self.window_size = window_size;
+        self.gui_width = gui_width;
+    }
+
+    // Check if a mouse position is within the 3D render area (not GUI area)
+    fn is_in_render_area(&self, mouse_pos: glam::Vec2) -> bool {
+        const PANEL_RESIZE_PADDING: f32 = 20.0; // Padding in pixels to avoid accidental camera movement
+        
+        let render_area_width = self.window_size.x - self.gui_width - PANEL_RESIZE_PADDING;
+        mouse_pos.x >= 0.0 && mouse_pos.x < render_area_width && 
+        mouse_pos.y >= 0.0 && mouse_pos.y < self.window_size.y
     }
 
     // keyboard input handler
@@ -124,6 +147,17 @@ impl CameraController {
 
     fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) -> bool {
         let is_pressed = state == ElementState::Pressed;
+        
+        // When mouse is pressed, check if it's in the render area
+        if is_pressed {
+            self.input.mouse_started_in_render_area = self.is_in_render_area(self.input.last_mouse_pos);
+        }
+        
+        // Only process mouse input if it started in the render area
+        if !self.input.mouse_started_in_render_area && is_pressed {
+            return false;
+        }
+        
         match button {
             MouseButton::Left => {
                 self.input.is_mouse_pressed = is_pressed;
@@ -142,6 +176,12 @@ impl CameraController {
     }
 
     fn handle_cursor_moved(&mut self, new_pos: glam::Vec2) -> bool {
+        // Only process mouse movement if the interaction started in the render area
+        if !self.input.mouse_started_in_render_area {
+            self.input.last_mouse_pos = new_pos;
+            return false;
+        }
+        
         if self.input.is_mouse_pressed {
             // Left mouse: orbit camera around target
             let delta = new_pos - self.input.last_mouse_pos;

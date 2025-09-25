@@ -8,13 +8,19 @@ use winit::{
 };
 mod camera;
 mod camera_controller;
+mod gui;
 mod renderer;
+use gui::GuiState;
 use renderer::Renderer;
 
 struct App {
     pointcloud: PointCloud,
     renderer: Option<Renderer>,
     window: Option<Arc<Window>>,
+    gui_state: GuiState,
+    egui_ctx: Option<egui::Context>,
+    egui_state: Option<egui_winit::State>,
+    egui_renderer: Option<egui_wgpu::Renderer>,
 }
 
 impl App {
@@ -23,6 +29,10 @@ impl App {
             pointcloud,
             renderer: None,
             window: None,
+            gui_state: GuiState::new(),
+            egui_ctx: None,
+            egui_state: None,
+            egui_renderer: None,
         }
     }
 }
@@ -36,8 +46,21 @@ impl ApplicationHandler for App {
         let window = Arc::new(event_loop.create_window(window_attributes).unwrap());
         let renderer = pollster::block_on(Renderer::new(window.clone(), &self.pointcloud));
 
+        // Initialize egui
+        let egui_ctx = egui::Context::default();
+        let egui_state = egui_winit::State::new(
+            egui_ctx.clone(),
+            egui::viewport::ViewportId::ROOT,
+            &window,
+            Some(window.scale_factor() as f32),
+            None,
+            None,
+        );
+
         self.window = Some(window);
         self.renderer = Some(renderer);
+        self.egui_ctx = Some(egui_ctx);
+        self.egui_state = Some(egui_state);
     }
 
     fn window_event(
@@ -46,6 +69,12 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
+        // Handle egui events first
+        if let (Some(ref mut egui_state), Some(ref window)) = (&mut self.egui_state, &self.window) {
+            let _ = egui_state.on_window_event(window.as_ref(), &event);
+            // For now, we'll always pass events to the 3D renderer too
+        }
+
         if let Some(ref mut renderer) = self.renderer {
             if !renderer.input(&event) {
                 match event {
@@ -64,8 +93,60 @@ impl ApplicationHandler for App {
                         renderer.resize(physical_size);
                     }
                     WindowEvent::RedrawRequested => {
+                        // Update renderer
                         renderer.update();
-                        match renderer.render() {
+
+                        // Run egui and render
+                        let render_result = if let (
+                            Some(ref egui_ctx),
+                            Some(ref mut egui_state),
+                            Some(ref window),
+                        ) =
+                            (&self.egui_ctx, &mut self.egui_state, &self.window)
+                        {
+                            // Update GUI state with camera information
+                            let camera = renderer.get_camera();
+                            let position = camera.get_eye().to_array();
+                            let target = camera.get_target().to_array();
+                            let distance = camera.get_distance();
+                            self.gui_state
+                                .update_camera_info(position, target, distance);
+
+                            let raw_input = egui_state.take_egui_input(&**window);
+                            let full_output = egui_ctx.run(raw_input, |ctx| {
+                                self.gui_state.render(ctx);
+                            });
+
+                            // Update camera controller with actual GUI panel width
+                            let actual_gui_width = self.gui_state.get_actual_panel_width();
+                            renderer.update_gui_width(actual_gui_width);
+
+                            // Initialize egui renderer if needed
+                            if self.egui_renderer.is_none() {
+                                self.egui_renderer = Some(egui_wgpu::Renderer::new(
+                                    renderer.get_device(),
+                                    renderer.get_config().format,
+                                    None,
+                                    1,
+                                    false,
+                                ));
+                            }
+
+                            let render_result =
+                                if let Some(ref mut egui_renderer) = self.egui_renderer {
+                                    renderer.render_with_egui(egui_renderer, egui_ctx, &full_output)
+                                } else {
+                                    renderer.render()
+                                };
+
+                            egui_state
+                                .handle_platform_output(&**window, full_output.platform_output);
+                            render_result
+                        } else {
+                            renderer.render()
+                        };
+
+                        match render_result {
                             Ok(_) => {}
                             Err(wgpu::SurfaceError::Lost) => renderer.resize(renderer.size),
                             Err(wgpu::SurfaceError::OutOfMemory) => event_loop.exit(),
