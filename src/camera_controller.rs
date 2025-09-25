@@ -25,6 +25,7 @@ struct InputState {
     // Mouse states
     is_mouse_pressed: bool,
     is_right_mouse_pressed: bool,
+    is_middle_mouse_pressed: bool,
     last_mouse_pos: glam::Vec2,
 }
 
@@ -39,6 +40,7 @@ impl Default for InputState {
             is_pan_down_pressed: false,
             is_mouse_pressed: false,
             is_right_mouse_pressed: false,
+            is_middle_mouse_pressed: false,
             last_mouse_pos: glam::Vec2::ZERO,
         }
     }
@@ -132,12 +134,17 @@ impl CameraController {
                 self.input.is_right_mouse_pressed = is_pressed;
                 true
             }
+            MouseButton::Middle => {
+                self.input.is_middle_mouse_pressed = is_pressed;
+                true
+            }
             _ => false,
         }
     }
 
     fn handle_cursor_moved(&mut self, new_pos: glam::Vec2) -> bool {
         if self.input.is_mouse_pressed {
+            // Left mouse: orbit camera around target
             let delta = new_pos - self.input.last_mouse_pos;
             self.theta -= delta.x * self.sensitivity;
             self.phi -= delta.y * self.sensitivity;
@@ -145,9 +152,29 @@ impl CameraController {
             self.input.last_mouse_pos = new_pos;
             true
         } else if self.input.is_right_mouse_pressed {
+            // Right mouse: zoom in/out
             let delta = new_pos - self.input.last_mouse_pos;
             let zoom_amount = -delta.y * self.sensitivity * self.distance * 0.5;
             self.distance = (self.distance + zoom_amount).clamp(0.1, f32::MAX);
+            self.input.last_mouse_pos = new_pos;
+            true
+        } else if self.input.is_middle_mouse_pressed {
+            // Middle mouse: pan target (RViz-style)
+            let delta = new_pos - self.input.last_mouse_pos;
+            
+            // Calculate camera vectors for target panning
+            let camera_vectors = self.calculate_camera_vectors();
+            
+            // Scale the panning based on distance (closer = smaller movements, farther = larger movements)
+            let pan_scale = self.distance * 0.001;
+            
+            // Move target: 
+            // - Mouse right = view pans right (target moves left relative to camera)
+            // - Mouse up = view pans up (target moves down relative to camera)
+            let right_movement = camera_vectors.right * (-delta.x * pan_scale);
+            let up_movement = camera_vectors.up * (delta.y * pan_scale);
+            
+            self.target += right_movement + up_movement;
             self.input.last_mouse_pos = new_pos;
             true
         } else {
@@ -208,14 +235,29 @@ impl CameraController {
     }
 
     fn calculate_camera_vectors(&self) -> CameraVectors {
-        let forward = glam::Vec3::new(
-            self.theta.cos() * self.phi.cos(),
-            self.theta.sin() * self.phi.cos(),
-            self.phi.sin(),
-        ).normalize();
-        let right = forward.cross(UP).normalize();
+        // Calculate camera's local coordinate system for screen-space panning
+        
+        // Right vector: horizontal direction perpendicular to camera yaw (rotated 90 degrees)
+        let right = glam::Vec3::new(-self.theta.cos(), -self.theta.sin(), 0.0).normalize();
+        
+        // Up vector: should be perpendicular to right and properly account for pitch
+        // Since right = (-cos(theta), -sin(theta), 0), we can derive up from it
+        // The up vector should be in the plane defined by the right vector and world up (Z)
+        // and should represent screen-space "up" direction
+        
+        // For screen-space up, we want a vector that:
+        // 1. Is perpendicular to the right vector
+        // 2. Points in the direction that appears "up" on screen given current pitch
+        // 3. When pitch = 0 (horizontal), should be world up (0, 0, 1)
+        // 4. When pitch changes, should tilt accordingly
 
-        CameraVectors { right, up: UP}
+        let up = glam::Vec3::new(
+            -self.phi.sin() * self.theta.sin(),  // Y component based on yaw and pitch  
+            self.phi.sin() * self.theta.cos(),   // X component based on yaw and pitch
+            self.phi.cos(),                      // Z component based on pitch
+        ).normalize();
+        println!("Up vector: {:?}", up);
+        CameraVectors { right, up }
     }
 
     pub fn update(&mut self, camera: &mut OrbitCamera, dt: std::time::Duration) {

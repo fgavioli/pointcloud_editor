@@ -58,6 +58,22 @@ fn get_rainbow_color(intensity: u8, min_intensity: u8, max_intensity: u8) -> [f3
     }
 }
 
+fn create_axis_vertices(axis_length: f32) -> Vec<Vertex> {
+    vec![
+        // X-axis (Red)
+        Vertex { position: [0.0, 0.0, 0.0], color: [1.0, 0.0, 0.0] },
+        Vertex { position: [axis_length, 0.0, 0.0], color: [1.0, 0.0, 0.0] },
+        
+        // Y-axis (Green)  
+        Vertex { position: [0.0, 0.0, 0.0], color: [0.0, 1.0, 0.0] },
+        Vertex { position: [0.0, axis_length, 0.0], color: [0.0, 1.0, 0.0] },
+        
+        // Z-axis (Blue)
+        Vertex { position: [0.0, 0.0, 0.0], color: [0.0, 0.0, 1.0] },
+        Vertex { position: [0.0, 0.0, axis_length], color: [0.0, 0.0, 1.0] },
+    ]
+}
+
 pub struct Renderer {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -65,8 +81,12 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
     render_pipeline: wgpu::RenderPipeline,
+    line_render_pipeline: wgpu::RenderPipeline,
     vertex_buffers: Vec<wgpu::Buffer>,
     vertex_counts: Vec<u32>,
+    // Axis rendering
+    axis_vertex_buffer: wgpu::Buffer,
+    axis_vertex_count: u32,
     camera: OrbitCamera,
     camera_controller: CameraController,
     vp_mat: [[f32; 4]; 4],
@@ -116,8 +136,20 @@ impl Renderer {
         let vertices = Self::create_vertices_from_pointcloud(pointcloud);
         let (vertex_buffers, vertex_counts) = Self::create_vertex_buffers(&device, vertices);
 
+        // Create axis vertices and buffer
+        let max_extent = pointcloud.size.x.max(pointcloud.size.y).max(pointcloud.size.z);
+        let axis_length = max_extent * 0.2; // Axes are 20% of the model size
+        let axis_vertices = create_axis_vertices(axis_length);
+        let axis_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("Axis Vertex Buffer"),
+            contents: bytemuck::cast_slice(&axis_vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let axis_vertex_count = axis_vertices.len() as u32;
+
         // Create render pipeline
         let render_pipeline = Self::create_render_pipeline(&device, &config, &camera_bind_group_layout);
+        let line_render_pipeline = Self::create_line_render_pipeline(&device, &config, &camera_bind_group_layout);
 
         Self {
             surface,
@@ -126,8 +158,11 @@ impl Renderer {
             config,
             size,
             render_pipeline,
+            line_render_pipeline,
             vertex_buffers,
             vertex_counts,
+            axis_vertex_buffer,
+            axis_vertex_count,
             camera,
             camera_controller,
             vp_mat,
@@ -335,6 +370,59 @@ impl Renderer {
         })
     }
 
+    fn create_line_render_pipeline(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        camera_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> wgpu::RenderPipeline {
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Line Render Pipeline Layout"),
+                bind_group_layouts: &[camera_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Line Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vs_main",
+                buffers: &[Vertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::LineList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None, // Don't cull lines
+                polygon_mode: wgpu::PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None,
+        })
+    }
+
     // window resize callback
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
@@ -416,10 +504,17 @@ impl Renderer {
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
 
+            // Render point cloud
             for (buffer, &count) in self.vertex_buffers.iter().zip(&self.vertex_counts) {
                 render_pass.set_vertex_buffer(0, buffer.slice(..));
                 render_pass.draw(0..count, 0..1);
             }
+
+            // Render coordinate axes
+            render_pass.set_pipeline(&self.line_render_pipeline);
+            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
+            render_pass.draw(0..self.axis_vertex_count, 0..1);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
