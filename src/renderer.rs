@@ -208,13 +208,11 @@ impl Renderer {
         // plane has a width equal to the maximum horizontal size of the model.
         // d = (modelMaxHSize / (2tan(fov))) + (horizontalSize / 2)
         let initial_distance = (pointcloud.size.x / 2.0) / (camera.get_fov() / 2.0).tan();
-        let mut camera_controller =
-            CameraController::new(max_extent * 0.1, initial_target, initial_distance);
+        let mut camera_controller = CameraController::new(initial_target, initial_distance);
 
         // Set up initial layout information for camera controller
         let window_size = glam::Vec2::new(size.width as f32, size.height as f32);
-        let gui_width = 350.0; // Fixed GUI panel width
-        camera_controller.update_layout(window_size, gui_width);
+        camera_controller.set_window_size(window_size);
 
         // Calculate initial crop bounds from pointcloud
         let mut crop_min = glam::Vec3::new(f32::MAX, f32::MAX, f32::MAX);
@@ -646,15 +644,8 @@ impl Renderer {
 
             // Update camera controller layout information
             let window_size = glam::Vec2::new(new_size.width as f32, new_size.height as f32);
-            self.camera_controller
-                .update_layout(window_size, FIXED_PANEL_WIDTH);
+            self.camera_controller.set_window_size(window_size);
         }
-    }
-
-    pub fn update_gui_width(&mut self, _gui_width: f32) {
-        // Keep this method for compatibility but don't use gui_width since it's now fixed
-        let window_size = glam::Vec2::new(self.size.width as f32, self.size.height as f32);
-        self.camera_controller.update_layout(window_size, 350.0);
     }
 
     pub fn input(&mut self, event: &WindowEvent) -> bool {
@@ -677,8 +668,8 @@ impl Renderer {
         self.last_render_time = std::time::Instant::now();
 
         self.update_fps_counter(dt);
-        self.camera_controller.update(&mut self.camera, dt);
-        self.update_target_disc(); // Update disc position based on camera target
+        self.camera_controller.update(&mut self.camera);
+        self.update_target_disc();
         self.vp_mat = self.camera.get_vp_matrix().to_cols_array_2d();
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.vp_mat]));
@@ -886,6 +877,10 @@ impl Renderer {
         &self.camera
     }
 
+    pub fn get_camera_controller(&self) -> &CameraController {
+        &self.camera_controller
+    }
+
     pub fn get_device(&self) -> &wgpu::Device {
         &self.device
     }
@@ -901,7 +896,8 @@ impl Renderer {
     /// Update vertex buffers with new point cloud data
     pub fn update_point_cloud(&mut self, pointcloud: &crate::PointCloud) {
         // Create new vertex data
-        let vertices: Vec<Vertex> = pointcloud.points
+        let vertices: Vec<Vertex> = pointcloud
+            .points
             .iter()
             .enumerate()
             .map(|(i, &point)| {
@@ -922,12 +918,13 @@ impl Renderer {
             .collect();
 
         // Recreate vertex buffers with new data
-        let (new_vertex_buffers, new_vertex_counts) = Self::create_vertex_buffers(&self.device, vertices);
-        
+        let (new_vertex_buffers, new_vertex_counts) =
+            Self::create_vertex_buffers(&self.device, vertices);
+
         // Replace the old buffers
         self.vertex_buffers = new_vertex_buffers;
         self.vertex_counts = new_vertex_counts;
-        
+
         println!("Vertex buffers updated successfully");
     }
 }

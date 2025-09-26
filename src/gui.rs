@@ -20,6 +20,8 @@ pub struct GuiState {
     pub point_selection_failed: bool,
     // Alignment progress
     pub alignment_in_progress: bool,
+    // Export functionality
+    pub export_pcd_requested: bool,
 }
 
 #[derive(Default)]
@@ -27,6 +29,8 @@ pub struct CameraInfo {
     pub position: [f32; 3],
     pub target: [f32; 3],
     pub distance: f32,
+    pub theta: f32, // Horizontal angle (yaw) in radians
+    pub phi: f32,   // Vertical angle (pitch) in radians
 }
 
 impl GuiState {
@@ -35,39 +39,45 @@ impl GuiState {
             show_axes: true,
             show_target_disc: true,
             camera_info: CameraInfo::default(),
-            // Initialize cropping to wide ranges (will be updated based on point cloud bounds)
             crop_min: glam::Vec3::new(-100.0, -100.0, -100.0),
             crop_max: glam::Vec3::new(100.0, 100.0, 100.0),
-            // Initialize point cloud bounds to default values
             pointcloud_min: glam::Vec3::new(-100.0, -100.0, -100.0),
             pointcloud_max: glam::Vec3::new(100.0, 100.0, 100.0),
-            // Initialize alignment flags
             alignment_requested: false,
             reset_alignment_requested: false,
-            // Initialize point selection
             point_selection_mode: false,
             selected_ground_point: None,
             point_selection_failed: false,
-            // Initialize alignment progress
             alignment_in_progress: false,
+            export_pcd_requested: false,
         }
     }
 
-    pub fn update_camera_info(&mut self, position: [f32; 3], target: [f32; 3], distance: f32) {
+    pub fn update_camera_info(
+        &mut self,
+        position: [f32; 3],
+        target: [f32; 3],
+        distance: f32,
+        theta: f32,
+        phi: f32,
+    ) {
         self.camera_info.position = position;
         self.camera_info.target = target;
         self.camera_info.distance = distance;
+        self.camera_info.theta = theta;
+        self.camera_info.phi = phi;
     }
 
     pub fn update_pointcloud_bounds(&mut self, min_coords: glam::Vec3, max_coords: glam::Vec3) {
         self.pointcloud_min = min_coords;
         self.pointcloud_max = max_coords;
-        // Initialize crop bounds to full range on first update
-        let default_min = glam::Vec3::new(-100.0, -100.0, -100.0);
-        let default_max = glam::Vec3::new(100.0, 100.0, 100.0);
-        if self.crop_min == default_min && self.crop_max == default_max {
-            self.crop_min = min_coords;
-            self.crop_max = max_coords;
+        // Initialize crop bounds to full range if they're still at default values
+        let defaults = (
+            glam::Vec3::new(-100.0, -100.0, -100.0),
+            glam::Vec3::new(100.0, 100.0, 100.0),
+        );
+        if (self.crop_min, self.crop_max) == defaults {
+            (self.crop_min, self.crop_max) = (min_coords, max_coords);
         }
     }
 
@@ -92,115 +102,110 @@ impl GuiState {
 
                 ui.separator();
 
-                ui.collapsing("Ground plane alignment", |ui| {
-                    if self.point_selection_mode {
-                        ui.colored_label(
-                            egui::Color32::YELLOW,
-                            "Click on a point in the 3D view to align ground plane"
-                        );
-                        if ui.button("Cancel").clicked() {
+                egui::CollapsingHeader::new("Ground plane alignment")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        if self.point_selection_mode {
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                "Click on a point in the 3D view to align ground plane",
+                            );
+                            if ui.button("Cancel").clicked() {
+                                self.point_selection_mode = false;
+                                self.selected_ground_point = None;
+                                self.point_selection_failed = false;
+                            }
+                            if self.point_selection_failed {
+                                ui.colored_label(egui::Color32::RED, "No valid point found");
+                            }
+                        } else {
+                            if ui.button("Align to Ground").clicked() {
+                                self.point_selection_mode = true;
+                                self.selected_ground_point = None;
+                                self.point_selection_failed = false;
+                            }
+                        }
+                        if ui.button("Reset alignment").clicked() {
+                            self.reset_alignment_requested = true;
                             self.point_selection_mode = false;
                             self.selected_ground_point = None;
                             self.point_selection_failed = false;
                         }
-                        if self.point_selection_failed {
-                            ui.colored_label(
-                                egui::Color32::RED,
-                                "No valid point found"
-                            );
-                        }
-                    } else {
-                        if ui.button("Align to Ground").clicked() {
-                            self.point_selection_mode = true;
-                            self.selected_ground_point = None;
-                            self.point_selection_failed = false;
-                        }
-                    }
-                    if ui.button("Reset alignment").clicked() {
-                        self.reset_alignment_requested = true;
-                        self.point_selection_mode = false;
-                        self.selected_ground_point = None;
-                        self.point_selection_failed = false;
-                    }
-                }).fully_open();
+                    });
 
                 ui.separator();
 
-                ui.collapsing("Cropping", |ui| {
-                    ui.label("X Axis:");
-                    ui.add(
-                        egui::Slider::new(
-                            &mut self.crop_min.x,
-                            self.pointcloud_min.x..=self.pointcloud_max.x,
-                        )
-                        .text("Min X"),
-                    );
-                    ui.add(
-                        egui::Slider::new(
-                            &mut self.crop_max.x,
-                            self.pointcloud_min.x..=self.pointcloud_max.x,
-                        )
-                        .text("Max X"),
-                    );
-
-                    ui.label("Y Axis:");
-                    ui.add(
-                        egui::Slider::new(
-                            &mut self.crop_min.y,
-                            self.pointcloud_min.y..=self.pointcloud_max.y,
-                        )
-                        .text("Min Y"),
-                    );
-                    ui.add(
-                        egui::Slider::new(
-                            &mut self.crop_max.y,
-                            self.pointcloud_min.y..=self.pointcloud_max.y,
-                        )
-                        .text("Max Y"),
-                    );
-
-                    ui.label("Z Axis:");
-                    ui.add(
-                        egui::Slider::new(
-                            &mut self.crop_min.z,
-                            self.pointcloud_min.z..=self.pointcloud_max.z,
-                        )
-                        .text("Min Z"),
-                    );
-                    ui.add(
-                        egui::Slider::new(
-                            &mut self.crop_max.z,
-                            self.pointcloud_min.z..=self.pointcloud_max.z,
-                        )
-                        .text("Max Z"),
-                    );
-
-                    // Add a reset button
-                    if ui.button("Reset to Full Range").clicked() {
-                        self.crop_min = self.pointcloud_min;
-                        self.crop_max = self.pointcloud_max;
-                    }
-                }).fully_open();
+                egui::CollapsingHeader::new("Export")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        if ui.button("Export to PCD").clicked() {
+                            self.export_pcd_requested = true;
+                        }
+                    });
 
                 ui.separator();
 
-                // ui.collapsing("File Operations", |ui| {
-                //     if ui.button("Open Point Cloud...").clicked() {
-                //         // TODO: Implement file dialog
-                //         println!("Open file dialog would appear here");
-                //     }
+                egui::CollapsingHeader::new("Cropping")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.label("X Axis:");
+                        ui.add(
+                            egui::Slider::new(
+                                &mut self.crop_min.x,
+                                self.pointcloud_min.x..=self.pointcloud_max.x,
+                            )
+                            .text("Min X"),
+                        );
+                        ui.add(
+                            egui::Slider::new(
+                                &mut self.crop_max.x,
+                                self.pointcloud_min.x..=self.pointcloud_max.x,
+                            )
+                            .text("Max X"),
+                        );
 
-                //     if ui.button("Export View...").clicked() {
-                //         // TODO: Implement export functionality
-                //         println!("Export functionality would be here");
-                //     }
-                // });
-                // ui.separator();
+                        ui.label("Y Axis:");
+                        ui.add(
+                            egui::Slider::new(
+                                &mut self.crop_min.y,
+                                self.pointcloud_min.y..=self.pointcloud_max.y,
+                            )
+                            .text("Min Y"),
+                        );
+                        ui.add(
+                            egui::Slider::new(
+                                &mut self.crop_max.y,
+                                self.pointcloud_min.y..=self.pointcloud_max.y,
+                            )
+                            .text("Max Y"),
+                        );
+
+                        ui.label("Z Axis:");
+                        ui.add(
+                            egui::Slider::new(
+                                &mut self.crop_min.z,
+                                self.pointcloud_min.z..=self.pointcloud_max.z,
+                            )
+                            .text("Min Z"),
+                        );
+                        ui.add(
+                            egui::Slider::new(
+                                &mut self.crop_max.z,
+                                self.pointcloud_min.z..=self.pointcloud_max.z,
+                            )
+                            .text("Max Z"),
+                        );
+
+                        if ui.button("Reset crop coordinates").clicked() {
+                            self.crop_min = self.pointcloud_min;
+                            self.crop_max = self.pointcloud_max;
+                        }
+                    });
+
+                ui.separator();
 
                 // Bottom panel
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    // ui.label("Point Cloud Editor v0.1.0");
-
                     ui.separator();
 
                     ui.horizontal(|ui| {
@@ -225,60 +230,41 @@ impl GuiState {
                             self.camera_info.position[2]
                         ));
                     });
+                    ui.horizontal(|ui| {
+                        ui.label("Angles:");
+                        ui.label(format!(
+                            "(azimuth: {:.1}°, elevation: {:.1}°)",
+                            self.camera_info.theta.to_degrees(),
+                            self.camera_info.phi.to_degrees()
+                        ));
+                    });
 
                     ui.label("Camera Info:");
-
                     ui.separator();
 
-                    ui.label("• Middle Mouse: Move target");
-                    ui.label("• Right Mouse / Mouse Wheel: Zoom");
-                    ui.label("• Left Mouse: Orbit camera");
+                    [
+                        "• Left Mouse: Orbit camera",
+                        "• Right Mouse / Mouse Wheel: Zoom",
+                        "• Middle Mouse: Move target",
+                    ]
+                    .iter()
+                    .for_each(|&control| {
+                        ui.label(control);
+                    });
                     ui.label("Camera Controls:");
-
                     ui.separator();
                 });
             });
-
-        // Show alignment progress dialog
-        if self.alignment_in_progress {
-            egui::Window::new("Aligning Point Cloud")
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
-                .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Calculating ground plane alignment...");
-                    });
-                    ui.add_space(10.0);
-                    ui.label("Please wait while the point cloud is being aligned.");
-                });
-        }
-    }
-
-    pub fn get_actual_panel_width(&self) -> f32 {
-        350.0 // Return fixed width
     }
 
     /// Check if alignment was requested and reset the flag
     pub fn take_alignment_request(&mut self) -> bool {
-        if self.alignment_requested {
-            println!("take_alignment_request: returning true, resetting flag");
-            self.alignment_requested = false;
-            true
-        } else {
-            false
-        }
+        std::mem::take(&mut self.alignment_requested)
     }
 
     /// Check if reset alignment was requested and reset the flag
     pub fn take_reset_alignment_request(&mut self) -> bool {
-        if self.reset_alignment_requested {
-            self.reset_alignment_requested = false;
-            true
-        } else {
-            false
-        }
+        std::mem::take(&mut self.reset_alignment_requested)
     }
 
     /// Check if we're in point selection mode
@@ -311,5 +297,10 @@ impl GuiState {
     /// Stop alignment progress
     pub fn stop_alignment_progress(&mut self) {
         self.alignment_in_progress = false;
+    }
+
+    /// Check if export PCD was requested and reset the flag
+    pub fn take_export_pcd_request(&mut self) -> bool {
+        std::mem::take(&mut self.export_pcd_requested)
     }
 }

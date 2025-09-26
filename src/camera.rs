@@ -1,7 +1,3 @@
-/**
- * Orbit Camera
- */
-
 // Up vector
 const UP: glam::Vec3 = glam::Vec3::Z;
 
