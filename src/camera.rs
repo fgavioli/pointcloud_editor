@@ -66,4 +66,41 @@ impl OrbitCamera {
     pub fn get_distance(&self) -> f32 {
         self.eye.distance(self.target)
     }
+
+    /// Convert screen coordinates to world ray
+    pub fn screen_to_world_ray(&self, screen_pos: (f32, f32), screen_size: (f32, f32)) -> (glam::Vec3, glam::Vec3) {
+        // Convert screen coordinates to normalized device coordinates (-1 to 1)
+        let ndc_x = (2.0 * screen_pos.0 / screen_size.0) - 1.0;
+        let ndc_y = 1.0 - (2.0 * screen_pos.1 / screen_size.1); // Flip Y axis
+
+        // Create projection matrix
+        let proj = glam::Mat4::perspective_rh(self.fov, self.aspect, self.znear, self.zfar);
+        let view = glam::Mat4::look_at_rh(self.eye, self.target, UP);
+        let proj_view = proj * view;
+
+        // Get inverse of projection-view matrix
+        let inv_proj_view = proj_view.inverse();
+
+        // Convert NDC points to world space
+        let near_point = inv_proj_view * glam::Vec4::new(ndc_x, ndc_y, -1.0, 1.0);
+        let far_point = inv_proj_view * glam::Vec4::new(ndc_x, ndc_y, 1.0, 1.0);
+
+        // Perspective divide
+        let near_world = glam::Vec3::new(
+            near_point.x / near_point.w,
+            near_point.y / near_point.w,
+            near_point.z / near_point.w,
+        );
+        let far_world = glam::Vec3::new(
+            far_point.x / far_point.w,
+            far_point.y / far_point.w,
+            far_point.z / far_point.w,
+        );
+
+        // Ray origin is camera position, direction is normalized vector from near to far
+        let ray_origin = self.eye;
+        let ray_direction = (far_world - near_world).normalize();
+
+        (ray_origin, ray_direction)
+    }
 }

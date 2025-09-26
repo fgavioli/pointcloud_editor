@@ -14,6 +14,12 @@ pub struct GuiState {
     // Ground plane alignment
     pub alignment_requested: bool,
     pub reset_alignment_requested: bool,
+    // Point selection mode
+    pub point_selection_mode: bool,
+    pub selected_ground_point: Option<glam::Vec3>,
+    pub point_selection_failed: bool,
+    // Alignment progress
+    pub alignment_in_progress: bool,
 }
 
 #[derive(Default)]
@@ -38,6 +44,12 @@ impl GuiState {
             // Initialize alignment flags
             alignment_requested: false,
             reset_alignment_requested: false,
+            // Initialize point selection
+            point_selection_mode: false,
+            selected_ground_point: None,
+            point_selection_failed: false,
+            // Initialize alignment progress
+            alignment_in_progress: false,
         }
     }
 
@@ -59,6 +71,11 @@ impl GuiState {
         }
     }
 
+    pub fn reset_crop_bounds_to_full_range(&mut self) {
+        self.crop_min = self.pointcloud_min;
+        self.crop_max = self.pointcloud_max;
+    }
+
     pub fn render(&mut self, ctx: &Context) {
         SidePanel::right("control_panel")
             .exact_width(350.0)
@@ -76,11 +93,43 @@ impl GuiState {
                 ui.separator();
 
                 ui.collapsing("Ground plane alignment", |ui| {
-                    ui.label("Align point cloud to ground plane:");
-                    if ui.button("Align").clicked() {
-                        self.alignment_requested = true;
+                    if self.point_selection_mode {
+                        if self.selected_ground_point.is_none() && !self.point_selection_failed {
+                            ui.colored_label(
+                                egui::Color32::YELLOW,
+                                "Click on a point in the 3D view to select ground point"
+                            );
+                        }
+                        if ui.button("Cancel point selection").clicked() {
+                            self.point_selection_mode = false;
+                            self.point_selection_failed = false;
+                        }
+                        if let Some(point) = self.selected_ground_point {
+                            ui.label(format!(
+                                "Selected point: ({:.2}, {:.2}, {:.2})",
+                                point.x, point.y, point.z
+                            ));
+                            if ui.button("Align to selected point").clicked() {
+                                println!("Align button clicked! Setting alignment_requested = true");
+                                self.alignment_requested = true;
+                                self.point_selection_mode = false; // Exit point selection mode after alignment
+                                self.point_selection_failed = false;
+                            }
+                        } else if self.point_selection_failed {
+                            ui.colored_label(
+                                egui::Color32::RED,
+                                "No valid point found"
+                            );
+                        }
+                    } else {
+                        ui.label("Align point cloud to ground plane:");
+                        if ui.button("Select ground point").clicked() {
+                            self.point_selection_mode = true;
+                            self.selected_ground_point = None;
+                            self.point_selection_failed = false;
+                        }
                     }
-                    if ui.button("Reset").clicked() {
+                    if ui.button("Reset alignment").clicked() {
                         self.reset_alignment_requested = true;
                     }
                 }).fully_open();
@@ -199,6 +248,22 @@ impl GuiState {
                     ui.separator();
                 });
             });
+
+        // Show alignment progress dialog
+        if self.alignment_in_progress {
+            egui::Window::new("Aligning Point Cloud")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Calculating ground plane alignment...");
+                    });
+                    ui.add_space(10.0);
+                    ui.label("Please wait while the point cloud is being aligned.");
+                });
+        }
     }
 
     pub fn get_actual_panel_width(&self) -> f32 {
@@ -208,6 +273,7 @@ impl GuiState {
     /// Check if alignment was requested and reset the flag
     pub fn take_alignment_request(&mut self) -> bool {
         if self.alignment_requested {
+            println!("take_alignment_request: returning true, resetting flag");
             self.alignment_requested = false;
             true
         } else {
@@ -223,5 +289,43 @@ impl GuiState {
         } else {
             false
         }
+    }
+
+    /// Check if we're in point selection mode
+    pub fn is_point_selection_mode(&self) -> bool {
+        self.point_selection_mode
+    }
+
+    /// Set a selected ground point and exit point selection mode
+    pub fn set_ground_point(&mut self, point: glam::Vec3) {
+        self.selected_ground_point = Some(point);
+        // Don't exit point selection mode here - let the user decide what to do next
+        // self.point_selection_mode = false;
+    }
+
+    /// Get the selected ground point
+    pub fn get_selected_ground_point(&self) -> Option<glam::Vec3> {
+        self.selected_ground_point
+    }
+
+    /// Cancel point selection mode
+    pub fn cancel_point_selection(&mut self) {
+        self.point_selection_mode = false;
+        self.point_selection_failed = false;
+    }
+
+    /// Set point selection as failed (no valid point found)
+    pub fn set_point_selection_failed(&mut self) {
+        self.point_selection_failed = true;
+    }
+
+    /// Start alignment progress
+    pub fn start_alignment_progress(&mut self) {
+        self.alignment_in_progress = true;
+    }
+
+    /// Stop alignment progress
+    pub fn stop_alignment_progress(&mut self) {
+        self.alignment_in_progress = false;
     }
 }

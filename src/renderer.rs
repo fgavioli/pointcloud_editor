@@ -219,27 +219,45 @@ impl Renderer {
         // Calculate initial crop bounds from pointcloud
         let mut crop_min = glam::Vec3::new(f32::MAX, f32::MAX, f32::MAX);
         let mut crop_max = glam::Vec3::new(f32::MIN, f32::MIN, f32::MIN);
-        
-        for i in 0..pointcloud.x.len() {
-            let x = pointcloud.x[i];
-            let y = pointcloud.y[i]; 
-            let z = pointcloud.z[i];
-            
+
+        for i in 0..pointcloud.points.len() {
+            let x = pointcloud.points[i].x;
+            let y = pointcloud.points[i].y;
+            let z = pointcloud.points[i].z;
+
             crop_min.x = crop_min.x.min(x);
             crop_min.y = crop_min.y.min(y);
             crop_min.z = crop_min.z.min(z);
-            
+
             crop_max.x = crop_max.x.max(x);
             crop_max.y = crop_max.y.max(y);
             crop_max.z = crop_max.z.max(z);
         }
 
         // Setup camera uniforms
-        let (vp_mat, camera_buffer, camera_bind_group, camera_bind_group_layout, crop_buffer, crop_bind_group) =
-            Self::setup_camera_uniforms(&device, &camera, crop_min, crop_max);
+        let (
+            vp_mat,
+            camera_buffer,
+            camera_bind_group,
+            camera_bind_group_layout,
+            crop_buffer,
+            crop_bind_group,
+        ) = Self::setup_camera_uniforms(&device, &camera, crop_min, crop_max);
 
         // Create vertex data and buffers
-        let vertices = Self::create_vertices_from_pointcloud(pointcloud);
+        let vertices = pointcloud
+            .points
+            .iter()
+            .enumerate()
+            .map(|(i, point)| Vertex {
+                position: [point.x, point.y, point.z],
+                color: get_rainbow_color(
+                    pointcloud.intensity[i],
+                    pointcloud.min_intensity,
+                    pointcloud.max_intensity,
+                ),
+            })
+            .collect();
         let (vertex_buffers, vertex_counts) = Self::create_vertex_buffers(&device, vertices);
 
         // Create axis vertices and buffer
@@ -348,15 +366,13 @@ impl Renderer {
             .unwrap();
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    label: None,
-                    required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::default(),
-                    memory_hints: wgpu::MemoryHints::default(),
-                    trace: wgpu::Trace::default(),
-                },
-            )
+            .request_device(&wgpu::DeviceDescriptor {
+                label: None,
+                required_features: wgpu::Features::empty(),
+                required_limits: wgpu::Limits::default(),
+                memory_hints: wgpu::MemoryHints::default(),
+                trace: wgpu::Trace::default(),
+            })
             .await
             .unwrap();
 
@@ -412,32 +428,31 @@ impl Renderer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::VERTEX,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
-                ],
-                label: Some("bind_group_layout"),
-            });
+                    count: None,
+                },
+            ],
+            label: Some("bind_group_layout"),
+        });
 
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             layout: &bind_group_layout,
@@ -477,23 +492,6 @@ impl Renderer {
             crop_buffer,
             crop_bind_group,
         )
-    }
-
-    // Vertex Processing
-    fn create_vertices_from_pointcloud(pointcloud: &PointCloud) -> Vec<Vertex> {
-        let mut vertices = Vec::with_capacity(pointcloud.x.len());
-
-        for i in 0..pointcloud.x.len() {
-            let position = [pointcloud.x[i], pointcloud.y[i], pointcloud.z[i]];
-            let color = get_rainbow_color(
-                pointcloud.intensity[i],
-                pointcloud.min_intensity,
-                pointcloud.max_intensity,
-            );
-            vertices.push(Vertex { position, color });
-        }
-
-        vertices
     }
 
     fn create_vertex_buffers(
@@ -632,7 +630,7 @@ impl Renderer {
         })
     }
 
-        // window resize callback
+    // window resize callback
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
@@ -646,16 +644,13 @@ impl Renderer {
             let drawable_height = new_size.height as f32;
             let drawable_aspect = drawable_width / drawable_height;
 
-            self.camera.update_proj(
-                CAMERA_FOV,
-                drawable_aspect,
-                Z_NEAR,
-                self.z_far,
-            );
+            self.camera
+                .update_proj(CAMERA_FOV, drawable_aspect, Z_NEAR, self.z_far);
 
             // Update camera controller layout information
             let window_size = glam::Vec2::new(new_size.width as f32, new_size.height as f32);
-            self.camera_controller.update_layout(window_size, FIXED_PANEL_WIDTH);
+            self.camera_controller
+                .update_layout(window_size, FIXED_PANEL_WIDTH);
         }
     }
 
@@ -676,11 +671,8 @@ impl Renderer {
 
     pub fn update_crop_bounds(&mut self, crop_min: glam::Vec3, crop_max: glam::Vec3) {
         let crop_uniform = CropUniform::new(crop_min, crop_max);
-        self.queue.write_buffer(
-            &self.crop_buffer,
-            0,
-            bytemuck::cast_slice(&[crop_uniform])
-        );
+        self.queue
+            .write_buffer(&self.crop_buffer, 0, bytemuck::cast_slice(&[crop_uniform]));
     }
 
     pub fn update(&mut self) {
@@ -774,7 +766,7 @@ impl Renderer {
         &mut self,
         egui_renderer: &mut egui_wgpu::Renderer,
         egui_ctx: &egui::Context,
-        full_output: &egui::FullOutput
+        full_output: &egui::FullOutput,
     ) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -845,7 +837,8 @@ impl Renderer {
             pixels_per_point: full_output.pixels_per_point,
         };
 
-        let primitives = egui_ctx.tessellate(full_output.shapes.clone(), full_output.pixels_per_point);
+        let primitives =
+            egui_ctx.tessellate(full_output.shapes.clone(), full_output.pixels_per_point);
 
         // Update egui buffers
         egui_renderer.update_buffers(
@@ -902,5 +895,44 @@ impl Renderer {
 
     pub fn get_config(&self) -> &wgpu::SurfaceConfiguration {
         &self.config
+    }
+
+    pub fn get_screen_size(&self) -> (f32, f32) {
+        (self.size.width as f32, self.size.height as f32)
+    }
+
+    /// Update vertex buffers with new point cloud data
+    pub fn update_point_cloud(&mut self, pointcloud: &crate::PointCloud) {
+        println!("Updating vertex buffers with new point cloud data...");
+        
+        // Create new vertex data
+        let vertices: Vec<Vertex> = pointcloud.points
+            .iter()
+            .enumerate()
+            .map(|(i, &point)| {
+                let color = if i < pointcloud.intensity.len() {
+                    get_rainbow_color(
+                        pointcloud.intensity[i],
+                        pointcloud.min_intensity,
+                        pointcloud.max_intensity,
+                    )
+                } else {
+                    [0.0, 0.0, 0.0] // Black for points without intensity
+                };
+                Vertex {
+                    position: [point.x, point.y, point.z],
+                    color,
+                }
+            })
+            .collect();
+
+        // Recreate vertex buffers with new data
+        let (new_vertex_buffers, new_vertex_counts) = Self::create_vertex_buffers(&self.device, vertices);
+        
+        // Replace the old buffers
+        self.vertex_buffers = new_vertex_buffers;
+        self.vertex_counts = new_vertex_counts;
+        
+        println!("Vertex buffers updated successfully");
     }
 }

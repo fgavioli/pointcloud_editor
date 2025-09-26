@@ -1,3 +1,4 @@
+use glam::{Mat3, Quat, Vec3};
 use pcd_rs::DynReader;
 use std::{env, io::Write, sync::Arc};
 use winit::{
@@ -13,6 +14,37 @@ mod renderer;
 use gui::GuiState;
 use renderer::Renderer;
 
+/// Find the closest point in the point cloud to a ray
+fn find_closest_point_to_ray(
+    pointcloud: &PointCloud,
+    ray_origin: glam::Vec3,
+    ray_direction: glam::Vec3,
+    max_distance: f32,
+) -> Option<glam::Vec3> {
+    let mut closest_point = None;
+    let mut min_distance = f32::MAX;
+
+    for &point in &pointcloud.points {
+        // Calculate distance from point to ray using cross product
+        let to_point = point - ray_origin;
+        let projection_length = to_point.dot(ray_direction);
+
+        // Only consider points in front of the camera
+        if projection_length > 0.0 {
+            let projection = ray_origin + ray_direction * projection_length;
+            let distance_to_ray = point.distance(projection);
+
+            // Check if this point is closer to the ray and within max distance
+            if distance_to_ray < min_distance && distance_to_ray < max_distance {
+                min_distance = distance_to_ray;
+                closest_point = Some(point);
+            }
+        }
+    }
+
+    closest_point
+}
+
 struct App {
     original_pointcloud: PointCloud, // Keep the original for reset
     current_pointcloud: PointCloud,  // Current (potentially aligned) point cloud for rendering
@@ -22,108 +54,122 @@ struct App {
     egui_ctx: Option<egui::Context>,
     egui_state: Option<egui_winit::State>,
     egui_renderer: Option<egui_wgpu::Renderer>,
+    cursor_position: Option<(f64, f64)>,
+    needs_renderer_recreation: bool,
+    needs_vertex_update: bool,
+}
+
+// Fit a plane to the input cloud via PCA
+pub fn planefit_pca(points: &[Vec3]) -> Quat {
+    if points.len() < 3 {
+        return Quat::IDENTITY; // Not enough points to define a plane
+    }
+    let centroid = points.iter().copied().reduce(|a, b| a + b).unwrap() / (points.len() as f32);
+    let mut cov = Mat3::ZERO;
+    for &p in points {
+        let r = p - centroid;
+        cov += Mat3::from_cols(r * r.x, r * r.y, r * r.z);
+    }
+    cov /= points.len() as f32;
+
+    let epsilon = 1e-6;
+    let inv_cov = cov + Mat3::from_diagonal(Vec3::splat(epsilon)); // regularize
+    let inv_cov = inv_cov.inverse();
+
+    let mut normal = Vec3::new(1.0, 0.0, 0.0);
+    for _ in 0..20 {
+        normal = (inv_cov * normal).normalize();
+    }
+
+    // Ensure the normal points upward (positive Z direction)
+    // If the normal points downward, flip it
+    if normal.z < 0.0 {
+        normal = -normal;
+    }
+
+    let target = Vec3::Z;
+    let rot = if normal.abs_diff_eq(target, 1e-6) {
+        if normal.dot(target) > 0.0 {
+            Quat::IDENTITY
+        } else {
+            Quat::from_axis_angle(Vec3::X, std::f32::consts::PI)
+        }
+    } else {
+        let axis = normal.cross(target).normalize();
+        let angle = normal.dot(target).clamp(-1.0, 1.0).acos();
+        Quat::from_axis_angle(axis, angle)
+    };
+
+    rot
 }
 
 /// Align point cloud to ground plane
-fn align_pointcloud_to_ground(pointcloud: &PointCloud) -> PointCloud {
-    println!("Detecting ground plane...");
-
-    // build histogram by discretizing Z values in 1m bins
-    let bin_size = 0.5; // 1 meter bins
-    let mut histogram = std::collections::HashMap::new();
-    for &z in &pointcloud.z {
-        let bin = (z / bin_size).floor() as i32;
-        *histogram.entry(bin).or_insert(0) += 1;
-    }
-    // print the ordered histogram (for debugging)
-    let mut ordered_histogram: Vec<_> = histogram.into_iter().collect();
-    ordered_histogram.sort_by_key(|&(bin, _)| bin);
-    for (bin, count) in ordered_histogram {
-        println!("Bin {} [Z={:.1}-{}]:\t{}", bin, bin as f32 * bin_size, (bin + 1) as f32 * bin_size, count);
-    }
-    // Find the bin with the maximum count
-
-
-    // println!("Ground plane detected with {} inliers ({:.1}% of points)", 
-    //          best_inlier_count, (best_inlier_count as f32 / num_points as f32) * 100.0);
-    // println!("Ground plane normal: [{:.3}, {:.3}, {:.3}]", 
-    //          ground_normal.x, ground_normal.y, ground_normal.z);
-    
-    // // Target normal (Z-up)
-    // let target_normal = glam::Vec3::new(0.0, 0.0, 1.0);
-    
-    // // Calculate rotation axis and angle
-    // let rotation_axis = ground_normal.cross(target_normal);
-    // let rotation_angle = ground_normal.dot(target_normal).acos();
-    
-    // // Handle case where normals are already aligned or opposite
-    // let rotation_matrix = if rotation_axis.length() < 1e-6 {
-    //     if ground_normal.dot(target_normal) > 0.0 {
-    //         glam::Mat3::IDENTITY // Already aligned
-    //     } else {
-    //         glam::Mat3::from_rotation_x(std::f32::consts::PI) // Flip 180 degrees
-    //     }
-    // } else {
-    //     let rotation_axis = rotation_axis.normalize();
-    //     glam::Mat3::from_axis_angle(rotation_axis, rotation_angle)
-    // };
-    
-    // println!("Applying rotation (angle: {:.2}°)", rotation_angle.to_degrees());
-    
-    // // Apply rotation to all points
-    // let mut aligned_pointcloud = PointCloud {
-    //     x: Vec::with_capacity(num_points),
-    //     y: Vec::with_capacity(num_points),
-    //     z: Vec::with_capacity(num_points),
-    //     intensity: pointcloud.intensity.clone(),
-    //     min_coord: [f32::INFINITY; 3],
-    //     max_coord: [f32::NEG_INFINITY; 3],
-    //     size: glam::Vec3::ZERO,
-    //     min_intensity: pointcloud.min_intensity,
-    //     max_intensity: pointcloud.max_intensity,
-    // };
-    
-    // // Transform all points and update bounding box
-    // for i in 0..num_points {
-    //     let original_point = glam::Vec3::new(pointcloud.x[i], pointcloud.y[i], pointcloud.z[i]);
-    //     let rotated_point = rotation_matrix * original_point;
-        
-    //     aligned_pointcloud.x.push(rotated_point.x);
-    //     aligned_pointcloud.y.push(rotated_point.y);
-    //     aligned_pointcloud.z.push(rotated_point.z);
-        
-    //     // Update bounding box
-    //     aligned_pointcloud.min_coord[0] = aligned_pointcloud.min_coord[0].min(rotated_point.x);
-    //     aligned_pointcloud.min_coord[1] = aligned_pointcloud.min_coord[1].min(rotated_point.y);
-    //     aligned_pointcloud.min_coord[2] = aligned_pointcloud.min_coord[2].min(rotated_point.z);
-        
-    //     aligned_pointcloud.max_coord[0] = aligned_pointcloud.max_coord[0].max(rotated_point.x);
-    //     aligned_pointcloud.max_coord[1] = aligned_pointcloud.max_coord[1].max(rotated_point.y);
-    //     aligned_pointcloud.max_coord[2] = aligned_pointcloud.max_coord[2].max(rotated_point.z);
-    // }
-    
-    // // Calculate 3D size
-    // aligned_pointcloud.size = glam::Vec3::new(
-    //     aligned_pointcloud.max_coord[0] - aligned_pointcloud.min_coord[0],
-    //     aligned_pointcloud.max_coord[1] - aligned_pointcloud.min_coord[1],
-    //     aligned_pointcloud.max_coord[2] - aligned_pointcloud.min_coord[2],
+fn align_pointcloud_to_ground(
+    pointcloud: &PointCloud,
+    ground_point: glam::Vec3,
+    radius: glam::Vec3,
+) -> PointCloud {
+    // println!(
+    //     "Fitting ground plane around {} with radius {}",
+    //     ground_point, radius
     // );
-    
-    // println!("Ground plane alignment completed");
-    // println!("New bounds: min=[{:.2}, {:.2}, {:.2}], max=[{:.2}, {:.2}, {:.2}]",
-    //          aligned_pointcloud.min_coord[0], aligned_pointcloud.min_coord[1], aligned_pointcloud.min_coord[2],
-    //          aligned_pointcloud.max_coord[0], aligned_pointcloud.max_coord[1], aligned_pointcloud.max_coord[2]);
-    //
-    pointcloud.clone() // Placeholder: return original point cloud for now
+
+    // select points in radius
+    let planefit_points: Vec<glam::Vec3> = pointcloud
+        .points
+        .iter()
+        .filter(|&point| {
+            let dist = *point - ground_point;
+            dist.x.abs() <= radius.x && dist.y.abs() <= radius.y && dist.z.abs() <= radius.z
+        })
+        .copied()
+        .collect();
+
+    let rotation = planefit_pca(&planefit_points);
+    println!("Applying rotation: {}", rotation);
+
+    // Apply rotation to all points
+    let mut aligned_points = Vec::with_capacity(pointcloud.points.len());
+    let mut min_coord = glam::Vec3::splat(f32::INFINITY);
+    let mut max_coord = glam::Vec3::splat(f32::NEG_INFINITY);
+
+    // Transform all points and update bounding box
+    for &original_point in &pointcloud.points {
+        let rotated_point = rotation * original_point;
+        aligned_points.push(rotated_point);
+
+        // Update bounding box
+        min_coord = min_coord.min(rotated_point);
+        max_coord = max_coord.max(rotated_point);
+    }
+
+    // Calculate 3D size
+    let size = max_coord - min_coord;
+
+    let aligned_pointcloud = PointCloud {
+        points: aligned_points,
+        intensity: pointcloud.intensity.clone(),
+        min_coord,
+        max_coord,
+        size,
+        min_intensity: pointcloud.min_intensity,
+        max_intensity: pointcloud.max_intensity,
+    };
+
+    println!("Ground plane alignment completed");
+    println!(
+        "New bounds: min=[{:.2}, {:.2}, {:.2}], max=[{:.2}, {:.2}, {:.2}]",
+        min_coord.x, min_coord.y, min_coord.z, max_coord.x, max_coord.y, max_coord.z
+    );
+
+    aligned_pointcloud
 }
 
 impl App {
     fn new(pointcloud: PointCloud) -> Self {
         // Clone the pointcloud for both original and current
         let original_pointcloud = PointCloud {
-            x: pointcloud.x.clone(),
-            y: pointcloud.y.clone(),
-            z: pointcloud.z.clone(),
+            points: pointcloud.points.clone(),
             intensity: pointcloud.intensity.clone(),
             min_coord: pointcloud.min_coord,
             max_coord: pointcloud.max_coord,
@@ -141,6 +187,27 @@ impl App {
             egui_ctx: None,
             egui_state: None,
             egui_renderer: None,
+            cursor_position: None,
+            needs_renderer_recreation: false,
+            needs_vertex_update: false,
+        }
+    }
+
+    /// Recreate the renderer with updated point cloud data
+    fn recreate_renderer(&mut self) {
+        if let Some(ref window) = self.window {
+            println!("Recreating renderer with updated point cloud data...");
+            
+            // Drop the old renderer first to release GPU resources
+            self.renderer = None;
+            // Also drop egui renderer since it holds references to the old renderer's device
+            self.egui_renderer = None;
+            
+            // Create new renderer with updated point cloud
+            let new_renderer = pollster::block_on(Renderer::new(window.clone(), &self.current_pointcloud));
+            self.renderer = Some(new_renderer);
+            
+            println!("Renderer recreation completed");
         }
     }
 }
@@ -183,7 +250,80 @@ impl ApplicationHandler for App {
             // For now, we'll always pass events to the 3D renderer too
         }
 
+        // Check if we need to recreate renderer at the start of frame processing
+        if self.needs_renderer_recreation {
+            self.recreate_renderer();
+            self.needs_renderer_recreation = false;
+        }
+
+        // Check if we need to update vertex data
+        if self.needs_vertex_update {
+            if let Some(ref mut renderer) = self.renderer {
+                renderer.update_point_cloud(&self.current_pointcloud);
+                // Also update crop bounds in shader after alignment
+                renderer.update_crop_bounds(
+                    self.gui_state.crop_min,
+                    self.gui_state.crop_max,
+                );
+            }
+            self.needs_vertex_update = false;
+            // Stop progress dialog after vertex update is complete
+            self.gui_state.stop_alignment_progress();
+        }
+
         if let Some(ref mut renderer) = self.renderer {
+            // Handle point selection before other input processing
+            if let (Some(ref mut egui_state), Some(ref window)) =
+                (&mut self.egui_state, &self.window)
+            {
+                // Check if we should process this event for point selection
+                let consumed_by_egui = egui_state.on_window_event(window.as_ref(), &event).consumed;
+
+                // Track cursor movement
+                if let WindowEvent::CursorMoved { position, .. } = event {
+                    self.cursor_position = Some((position.x, position.y));
+                }
+
+                // Only process mouse clicks for point selection if egui didn't consume the event
+                if !consumed_by_egui && self.gui_state.is_point_selection_mode() {
+                    if let WindowEvent::MouseInput {
+                        button: winit::event::MouseButton::Left,
+                        state: ElementState::Pressed,
+                        ..
+                    } = event
+                    {
+                        // Get mouse position from stored cursor position
+                        if let Some((cursor_x, cursor_y)) = self.cursor_position {
+                            let screen_size = renderer.get_screen_size();
+                            let camera = renderer.get_camera();
+
+                            // Convert screen position to world ray
+                            let (ray_origin, ray_direction) = camera.screen_to_world_ray(
+                                (cursor_x as f32, cursor_y as f32),
+                                screen_size,
+                            );
+
+                            // Find closest point to the ray
+                            println!("Point selection click detected at ({}, {})", cursor_x, cursor_y);
+                            if let Some(closest_point) = find_closest_point_to_ray(
+                                &self.current_pointcloud,
+                                ray_origin,
+                                ray_direction,
+                                0.5, // Max distance threshold in world units
+                            ) {
+                                println!("Selected ground point: ({:.2}, {:.2}, {:.2})", 
+                                        closest_point.x, closest_point.y, closest_point.z);
+                                self.gui_state.set_ground_point(closest_point);
+                            } else {
+                                println!("No point found near click position");
+                                self.gui_state.set_point_selection_failed();
+                            }
+                        }
+                        return; // Don't process this event further
+                    }
+                }
+            }
+
             if !renderer.input(&event) {
                 match event {
                     WindowEvent::CloseRequested
@@ -249,28 +389,49 @@ impl ApplicationHandler for App {
 
                             // Handle ground plane alignment requests
                             if self.gui_state.take_alignment_request() {
-                                println!("Aligning point cloud to ground plane...");
-                                let aligned_pointcloud = align_pointcloud_to_ground(&self.original_pointcloud);
-                                self.current_pointcloud = aligned_pointcloud;
-                                
-                                // Update GUI bounds with the aligned point cloud
-                                self.gui_state.update_pointcloud_bounds(
-                                    glam::Vec3::from(self.current_pointcloud.min_coord),
-                                    glam::Vec3::from(self.current_pointcloud.max_coord),
-                                );
-                                
-                                // TODO: Need to recreate renderer with new point cloud data
-                                println!("Ground plane alignment completed (placeholder implementation)");
-                            }
+                                if let Some(ground_point) =
+                                    self.gui_state.get_selected_ground_point()
+                                {
+                                    println!(
+                                        "Aligning point cloud to ground plane at selected point..."
+                                    );
+                                    
+                                    // Start progress dialog
+                                    self.gui_state.start_alignment_progress();
+                                    
+                                    let aligned_pointcloud = align_pointcloud_to_ground(
+                                        &self.original_pointcloud,
+                                        ground_point,
+                                        glam::Vec3::new(2.0, 2.0, 4.0),
+                                    );
+                                    self.current_pointcloud = aligned_pointcloud;
 
-                            // Handle reset alignment requests
+                                    // Update GUI bounds with the aligned point cloud
+                                    self.gui_state.update_pointcloud_bounds(
+                                        glam::Vec3::from(self.current_pointcloud.min_coord),
+                                        glam::Vec3::from(self.current_pointcloud.max_coord),
+                                    );
+
+                                    // Reset crop bounds to show the full aligned point cloud
+                                    self.gui_state.reset_crop_bounds_to_full_range();
+
+                                    // Mark that we need to update vertex data
+                                    self.needs_vertex_update = true;
+                                    
+                                    // Progress dialog will be stopped after vertex update is complete
+                                    
+                                    println!(
+                                        "Ground plane alignment completed"
+                                    );
+                                } else {
+                                    println!("No ground point selected for alignment");
+                                }
+                            }                            // Handle reset alignment requests
                             if self.gui_state.take_reset_alignment_request() {
                                 println!("Resetting point cloud alignment...");
                                 // Reset to original point cloud
                                 self.current_pointcloud = PointCloud {
-                                    x: self.original_pointcloud.x.clone(),
-                                    y: self.original_pointcloud.y.clone(),
-                                    z: self.original_pointcloud.z.clone(),
+                                    points: self.original_pointcloud.points.clone(),
                                     intensity: self.original_pointcloud.intensity.clone(),
                                     min_coord: self.original_pointcloud.min_coord,
                                     max_coord: self.original_pointcloud.max_coord,
@@ -278,19 +439,24 @@ impl ApplicationHandler for App {
                                     min_intensity: self.original_pointcloud.min_intensity,
                                     max_intensity: self.original_pointcloud.max_intensity,
                                 };
-                                
+
                                 // Update GUI bounds with the original point cloud
                                 self.gui_state.update_pointcloud_bounds(
                                     glam::Vec3::from(self.current_pointcloud.min_coord),
                                     glam::Vec3::from(self.current_pointcloud.max_coord),
                                 );
-                                
-                                // TODO: Need to recreate renderer with original point cloud data
+
+                                // Reset crop bounds to show the full original point cloud
+                                self.gui_state.reset_crop_bounds_to_full_range();
+
+                                // Mark that we need to update vertex data
+                                self.needs_vertex_update = true;
                                 println!("Point cloud alignment reset completed");
                             }
 
                             // Initialize egui renderer if needed
                             if self.egui_renderer.is_none() {
+                                println!("Creating new egui renderer...");
                                 self.egui_renderer = Some(egui_wgpu::Renderer::new(
                                     renderer.get_device(),
                                     renderer.get_config().format,
@@ -298,6 +464,7 @@ impl ApplicationHandler for App {
                                     1,
                                     false,
                                 ));
+                                println!("Egui renderer created successfully");
                             }
 
                             let render_result =
@@ -325,6 +492,8 @@ impl ApplicationHandler for App {
                 }
             }
         }
+
+        // Renderer recreation is now handled at the start of frame processing
     }
 
     fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
@@ -336,13 +505,10 @@ impl ApplicationHandler for App {
 
 #[derive(Clone)]
 struct PointCloud {
-    // Structure of Arrays (SoA) for better memory efficiency
-    x: Vec<f32>,
-    y: Vec<f32>,
-    z: Vec<f32>,
+    points: Vec<glam::Vec3>,
     intensity: Vec<u8>,
-    min_coord: [f32; 3],
-    max_coord: [f32; 3],
+    min_coord: glam::Vec3,
+    max_coord: glam::Vec3,
     size: glam::Vec3, // 3D size (extent) of the point cloud
     min_intensity: u8,
     max_intensity: u8,
@@ -399,12 +565,10 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
     };
 
     let mut pointcloud = PointCloud {
-        x: Vec::new(),
-        y: Vec::new(),
-        z: Vec::new(),
+        points: Vec::new(),
         intensity: Vec::new(),
-        min_coord: [0.0, 0.0, 0.0],
-        max_coord: [0.0, 0.0, 0.0],
+        min_coord: glam::Vec3::splat(f32::INFINITY),
+        max_coord: glam::Vec3::splat(f32::NEG_INFINITY),
         size: glam::Vec3::ZERO,
         min_intensity: 0u8,
         max_intensity: 255u8,
@@ -444,30 +608,27 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         let field_intensity = &point.0[intensity_index];
 
         // Extract specific types
-        pointcloud
-            .x
-            .push(if let pcd_rs::Field::F32(ref values) = field_x {
-                values[0]
-            } else {
-                eprintln!("Expected F32 for x field. Found different type.");
-                continue;
-            });
-        pointcloud
-            .y
-            .push(if let pcd_rs::Field::F32(ref values) = field_y {
-                values[0]
-            } else {
-                eprintln!("Expected F32 for y field. Found different type.");
-                continue;
-            });
-        pointcloud
-            .z
-            .push(if let pcd_rs::Field::F32(ref values) = field_z {
-                values[0]
-            } else {
-                eprintln!("Expected F32 for z field. Found different type.");
-                continue;
-            });
+
+        let x_val = if let pcd_rs::Field::F32(ref values) = field_x {
+            values[0]
+        } else {
+            eprintln!("Expected F32 for x field. Found different type.");
+            continue;
+        };
+        let y_val = if let pcd_rs::Field::F32(ref values) = field_y {
+            values[0]
+        } else {
+            eprintln!("Expected F32 for y field. Found different type.");
+            continue;
+        };
+        let z_val = if let pcd_rs::Field::F32(ref values) = field_z {
+            values[0]
+        } else {
+            eprintln!("Expected F32 for z field. Found different type.");
+            continue;
+        };
+        pointcloud.points.push(glam::Vec3::new(x_val, y_val, z_val));
+
         if has_intensity {
             pointcloud
                 .intensity
@@ -515,32 +676,17 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
     print!("\r");
 
     // Compute bounding box
-    pointcloud.min_coord = [
-        pointcloud.x.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
-        pointcloud.y.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
-        pointcloud.z.iter().fold(f32::INFINITY, |a, &b| a.min(b)),
-    ];
-    pointcloud.max_coord = [
-        pointcloud
-            .x
-            .iter()
-            .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-        pointcloud
-            .y
-            .iter()
-            .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-        pointcloud
-            .z
-            .iter()
-            .fold(f32::NEG_INFINITY, |a, &b| a.max(b)),
-    ];
+    pointcloud.min_coord = pointcloud
+        .points
+        .iter()
+        .fold(glam::Vec3::splat(f32::INFINITY), |min, p| min.min(*p));
+    pointcloud.max_coord = pointcloud
+        .points
+        .iter()
+        .fold(glam::Vec3::splat(f32::NEG_INFINITY), |max, p| max.max(*p));
 
     // Calculate 3D size (extent) of the point cloud
-    pointcloud.size = glam::Vec3::new(
-        pointcloud.max_coord[0] - pointcloud.min_coord[0],
-        pointcloud.max_coord[1] - pointcloud.min_coord[1],
-        pointcloud.max_coord[2] - pointcloud.min_coord[2],
-    );
+    pointcloud.size = pointcloud.max_coord - pointcloud.min_coord;
 
     // rescale intensity to 0-255
     if has_intensity {
@@ -564,7 +710,7 @@ fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
     println!(
         "[Load done, {} ms : {} points]",
         load_time,
-        pointcloud.x.len()
+        pointcloud.points.len()
     );
 
     Some(pointcloud)
