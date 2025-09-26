@@ -505,9 +505,6 @@ impl Renderer {
         let mut buffers = Vec::new();
         let mut counts = Vec::new();
 
-        println!("Total vertices: {}", vertices.len());
-        println!("Max vertices per buffer: {}", max_vertices_per_buffer);
-
         for chunk in vertices.chunks(max_vertices_per_buffer) {
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Vertex Buffer Chunk"),
@@ -903,8 +900,6 @@ impl Renderer {
 
     /// Update vertex buffers with new point cloud data
     pub fn update_point_cloud(&mut self, pointcloud: &crate::PointCloud) {
-        println!("Updating vertex buffers with new point cloud data...");
-        
         // Create new vertex data
         let vertices: Vec<Vertex> = pointcloud.points
             .iter()

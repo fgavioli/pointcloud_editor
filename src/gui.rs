@@ -94,36 +94,23 @@ impl GuiState {
 
                 ui.collapsing("Ground plane alignment", |ui| {
                     if self.point_selection_mode {
-                        if self.selected_ground_point.is_none() && !self.point_selection_failed {
-                            ui.colored_label(
-                                egui::Color32::YELLOW,
-                                "Click on a point in the 3D view to select ground point"
-                            );
-                        }
-                        if ui.button("Cancel point selection").clicked() {
+                        ui.colored_label(
+                            egui::Color32::YELLOW,
+                            "Click on a point in the 3D view to align ground plane"
+                        );
+                        if ui.button("Cancel").clicked() {
                             self.point_selection_mode = false;
+                            self.selected_ground_point = None;
                             self.point_selection_failed = false;
                         }
-                        if let Some(point) = self.selected_ground_point {
-                            ui.label(format!(
-                                "Selected point: ({:.2}, {:.2}, {:.2})",
-                                point.x, point.y, point.z
-                            ));
-                            if ui.button("Align to selected point").clicked() {
-                                println!("Align button clicked! Setting alignment_requested = true");
-                                self.alignment_requested = true;
-                                self.point_selection_mode = false; // Exit point selection mode after alignment
-                                self.point_selection_failed = false;
-                            }
-                        } else if self.point_selection_failed {
+                        if self.point_selection_failed {
                             ui.colored_label(
                                 egui::Color32::RED,
                                 "No valid point found"
                             );
                         }
                     } else {
-                        ui.label("Align point cloud to ground plane:");
-                        if ui.button("Select ground point").clicked() {
+                        if ui.button("Align to Ground").clicked() {
                             self.point_selection_mode = true;
                             self.selected_ground_point = None;
                             self.point_selection_failed = false;
@@ -131,6 +118,9 @@ impl GuiState {
                     }
                     if ui.button("Reset alignment").clicked() {
                         self.reset_alignment_requested = true;
+                        self.point_selection_mode = false;
+                        self.selected_ground_point = None;
+                        self.point_selection_failed = false;
                     }
                 }).fully_open();
 
@@ -306,12 +296,6 @@ impl GuiState {
     /// Get the selected ground point
     pub fn get_selected_ground_point(&self) -> Option<glam::Vec3> {
         self.selected_ground_point
-    }
-
-    /// Cancel point selection mode
-    pub fn cancel_point_selection(&mut self) {
-        self.point_selection_mode = false;
-        self.point_selection_failed = false;
     }
 
     /// Set point selection as failed (no valid point found)

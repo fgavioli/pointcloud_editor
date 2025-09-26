@@ -109,12 +109,6 @@ fn align_pointcloud_to_ground(
     ground_point: glam::Vec3,
     radius: glam::Vec3,
 ) -> PointCloud {
-    // println!(
-    //     "Fitting ground plane around {} with radius {}",
-    //     ground_point, radius
-    // );
-
-    // select points in radius
     let planefit_points: Vec<glam::Vec3> = pointcloud
         .points
         .iter()
@@ -126,27 +120,27 @@ fn align_pointcloud_to_ground(
         .collect();
 
     let rotation = planefit_pca(&planefit_points);
-    println!("Applying rotation: {}", rotation);
 
-    // Apply rotation to all points
-    let mut aligned_points = Vec::with_capacity(pointcloud.points.len());
-    let mut min_coord = glam::Vec3::splat(f32::INFINITY);
-    let mut max_coord = glam::Vec3::splat(f32::NEG_INFINITY);
+    let aligned_points: Vec<glam::Vec3> = pointcloud
+        .points
+        .iter()
+        .map(|&original_point| rotation * original_point)
+        .collect();
 
-    // Transform all points and update bounding box
-    for &original_point in &pointcloud.points {
-        let rotated_point = rotation * original_point;
-        aligned_points.push(rotated_point);
+    let min_coord = aligned_points
+        .iter()
+        .fold(glam::Vec3::splat(f32::INFINITY), |acc, &point| {
+            acc.min(point)
+        });
+    let max_coord = aligned_points
+        .iter()
+        .fold(glam::Vec3::splat(f32::NEG_INFINITY), |acc, &point| {
+            acc.max(point)
+        });
 
-        // Update bounding box
-        min_coord = min_coord.min(rotated_point);
-        max_coord = max_coord.max(rotated_point);
-    }
-
-    // Calculate 3D size
     let size = max_coord - min_coord;
 
-    let aligned_pointcloud = PointCloud {
+    PointCloud {
         points: aligned_points,
         intensity: pointcloud.intensity.clone(),
         min_coord,
@@ -154,15 +148,7 @@ fn align_pointcloud_to_ground(
         size,
         min_intensity: pointcloud.min_intensity,
         max_intensity: pointcloud.max_intensity,
-    };
-
-    println!("Ground plane alignment completed");
-    println!(
-        "New bounds: min=[{:.2}, {:.2}, {:.2}], max=[{:.2}, {:.2}, {:.2}]",
-        min_coord.x, min_coord.y, min_coord.z, max_coord.x, max_coord.y, max_coord.z
-    );
-
-    aligned_pointcloud
+    }
 }
 
 impl App {
@@ -197,16 +183,17 @@ impl App {
     fn recreate_renderer(&mut self) {
         if let Some(ref window) = self.window {
             println!("Recreating renderer with updated point cloud data...");
-            
+
             // Drop the old renderer first to release GPU resources
             self.renderer = None;
             // Also drop egui renderer since it holds references to the old renderer's device
             self.egui_renderer = None;
-            
+
             // Create new renderer with updated point cloud
-            let new_renderer = pollster::block_on(Renderer::new(window.clone(), &self.current_pointcloud));
+            let new_renderer =
+                pollster::block_on(Renderer::new(window.clone(), &self.current_pointcloud));
             self.renderer = Some(new_renderer);
-            
+
             println!("Renderer recreation completed");
         }
     }
@@ -261,10 +248,7 @@ impl ApplicationHandler for App {
             if let Some(ref mut renderer) = self.renderer {
                 renderer.update_point_cloud(&self.current_pointcloud);
                 // Also update crop bounds in shader after alignment
-                renderer.update_crop_bounds(
-                    self.gui_state.crop_min,
-                    self.gui_state.crop_max,
-                );
+                renderer.update_crop_bounds(self.gui_state.crop_min, self.gui_state.crop_max);
             }
             self.needs_vertex_update = false;
             // Stop progress dialog after vertex update is complete
@@ -303,19 +287,16 @@ impl ApplicationHandler for App {
                                 screen_size,
                             );
 
-                            // Find closest point to the ray
-                            println!("Point selection click detected at ({}, {})", cursor_x, cursor_y);
                             if let Some(closest_point) = find_closest_point_to_ray(
                                 &self.current_pointcloud,
                                 ray_origin,
                                 ray_direction,
                                 0.5, // Max distance threshold in world units
                             ) {
-                                println!("Selected ground point: ({:.2}, {:.2}, {:.2})", 
-                                        closest_point.x, closest_point.y, closest_point.z);
                                 self.gui_state.set_ground_point(closest_point);
+                                self.gui_state.alignment_requested = true;
+                                self.gui_state.point_selection_mode = false; // Exit point selection mode
                             } else {
-                                println!("No point found near click position");
                                 self.gui_state.set_point_selection_failed();
                             }
                         }
@@ -395,10 +376,10 @@ impl ApplicationHandler for App {
                                     println!(
                                         "Aligning point cloud to ground plane at selected point..."
                                     );
-                                    
+
                                     // Start progress dialog
                                     self.gui_state.start_alignment_progress();
-                                    
+
                                     let aligned_pointcloud = align_pointcloud_to_ground(
                                         &self.original_pointcloud,
                                         ground_point,
@@ -417,16 +398,14 @@ impl ApplicationHandler for App {
 
                                     // Mark that we need to update vertex data
                                     self.needs_vertex_update = true;
-                                    
+
                                     // Progress dialog will be stopped after vertex update is complete
-                                    
-                                    println!(
-                                        "Ground plane alignment completed"
-                                    );
+
+                                    println!("Ground plane alignment completed");
                                 } else {
                                     println!("No ground point selected for alignment");
                                 }
-                            }                            // Handle reset alignment requests
+                            } // Handle reset alignment requests
                             if self.gui_state.take_reset_alignment_request() {
                                 println!("Resetting point cloud alignment...");
                                 // Reset to original point cloud
@@ -451,12 +430,10 @@ impl ApplicationHandler for App {
 
                                 // Mark that we need to update vertex data
                                 self.needs_vertex_update = true;
-                                println!("Point cloud alignment reset completed");
                             }
 
                             // Initialize egui renderer if needed
                             if self.egui_renderer.is_none() {
-                                println!("Creating new egui renderer...");
                                 self.egui_renderer = Some(egui_wgpu::Renderer::new(
                                     renderer.get_device(),
                                     renderer.get_config().format,
@@ -464,7 +441,6 @@ impl ApplicationHandler for App {
                                     1,
                                     false,
                                 ));
-                                println!("Egui renderer created successfully");
                             }
 
                             let render_result =
