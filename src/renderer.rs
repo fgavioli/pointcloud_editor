@@ -1,7 +1,6 @@
 use crate::camera::OrbitCamera;
 use crate::camera_controller::CameraController;
 use crate::PointCloud;
-use crate::gui::GUI_WIDTH;
 use wgpu::util::DeviceExt;
 use winit::{event::*, window::Window};
 
@@ -159,13 +158,8 @@ impl Renderer {
         }
 
         // Setup camera uniforms
-        let (
-            vp_mat,
-            camera_buffer,
-            camera_bind_group,
-            camera_bind_group_layout,
-            crop_buffer,
-        ) = Self::setup_camera_uniforms(&device, &camera, crop_min, crop_max);
+        let (vp_mat, camera_buffer, camera_bind_group, camera_bind_group_layout, crop_buffer) =
+            Self::setup_camera_uniforms(&device, &camera, crop_min, crop_max);
 
         // Create vertex data and buffers
         let vertices = pointcloud
@@ -249,7 +243,8 @@ impl Renderer {
                 });
 
                 // Line to next point (creating the outer ring)
-                let next_angle = 2.0 * std::f32::consts::PI * ((i + 1) % segments) as f32 / segments as f32;
+                let next_angle =
+                    2.0 * std::f32::consts::PI * ((i + 1) % segments) as f32 / segments as f32;
                 let next_x = disc_radius * next_angle.cos();
                 let next_y = disc_radius * next_angle.sin();
 
@@ -586,8 +581,8 @@ impl Renderer {
             self.surface.configure(&self.device, &self.config);
 
             // Calculate aspect ratio based on drawable area (excluding fixed GUI panel)
-            const FIXED_PANEL_WIDTH: f32 = GUI_WIDTH;
-            let drawable_width = new_size.width as f32 - FIXED_PANEL_WIDTH;
+            const GUI_PANEL_WIDTH: f32 = 250.0;
+            let drawable_width = new_size.width as f32 - GUI_PANEL_WIDTH;
             let drawable_height = new_size.height as f32;
             let drawable_aspect = drawable_width / drawable_height;
 
@@ -659,29 +654,29 @@ impl Renderer {
     }
 
     fn render_scene(&mut self, render_pass: &mut wgpu::RenderPass) {
-        // Render point cloud
-        render_pass.set_pipeline(&self.render_pipeline);
+        // Set camera bind group once for all objects
         render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
 
+        // Render point cloud
+        render_pass.set_pipeline(&self.render_pipeline);
         for (buffer, &count) in self.vertex_buffers.iter().zip(&self.vertex_counts) {
             render_pass.set_vertex_buffer(0, buffer.slice(..));
             render_pass.draw(0..count, 0..1);
         }
 
-        // Render coordinate axes
-        if self.show_axes {
+        // Render coordinate axes and target disc with line pipeline
+        if self.show_axes || self.show_target_disc {
             render_pass.set_pipeline(&self.line_render_pipeline);
-            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
-            render_pass.draw(0..self.axis_vertex_count, 0..1);
-        }
 
-        // Render target disc
-        if self.show_target_disc {
-            render_pass.set_pipeline(&self.line_render_pipeline);
-            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-            render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
-            render_pass.draw(0..self.target_disc_vertex_count, 0..1);
+            if self.show_axes {
+                render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
+                render_pass.draw(0..self.axis_vertex_count, 0..1);
+            }
+
+            if self.show_target_disc {
+                render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
+                render_pass.draw(0..self.target_disc_vertex_count, 0..1);
+            }
         }
     }
 

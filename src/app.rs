@@ -25,16 +25,7 @@ pub struct App {
 
 impl App {
     pub fn new(pointcloud: PointCloud) -> Self {
-        // Clone the pointcloud for both original and current
-        let original_pointcloud = PointCloud {
-            points: pointcloud.points.clone(),
-            intensity: pointcloud.intensity.clone(),
-            min_coord: pointcloud.min_coord,
-            max_coord: pointcloud.max_coord,
-            size: pointcloud.size,
-            min_intensity: pointcloud.min_intensity,
-            max_intensity: pointcloud.max_intensity,
-        };
+        let original_pointcloud = pointcloud.clone();
 
         Self {
             original_pointcloud,
@@ -235,8 +226,6 @@ impl ApplicationHandler for App {
                                         glam::Vec3::from(self.current_pointcloud.min_coord),
                                         glam::Vec3::from(self.current_pointcloud.max_coord),
                                     );
-
-                                    // Reset crop bounds to show the full aligned point cloud
                                     self.gui_state.reset_crop_bounds_to_full_range();
 
                                     // Mark that we need to update vertex data
@@ -252,23 +241,13 @@ impl ApplicationHandler for App {
                             if self.gui_state.take_reset_alignment_request() {
                                 println!("Resetting point cloud alignment...");
                                 // Reset to original point cloud
-                                self.current_pointcloud = PointCloud {
-                                    points: self.original_pointcloud.points.clone(),
-                                    intensity: self.original_pointcloud.intensity.clone(),
-                                    min_coord: self.original_pointcloud.min_coord,
-                                    max_coord: self.original_pointcloud.max_coord,
-                                    size: self.original_pointcloud.size,
-                                    min_intensity: self.original_pointcloud.min_intensity,
-                                    max_intensity: self.original_pointcloud.max_intensity,
-                                };
+                                self.current_pointcloud = self.original_pointcloud.clone();
 
                                 // Update GUI bounds with the original point cloud
                                 self.gui_state.update_pointcloud_bounds(
                                     glam::Vec3::from(self.current_pointcloud.min_coord),
                                     glam::Vec3::from(self.current_pointcloud.max_coord),
                                 );
-
-                                // Reset crop bounds to show the full original point cloud
                                 self.gui_state.reset_crop_bounds_to_full_range();
 
                                 // Mark that we need to update vertex data
