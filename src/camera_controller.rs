@@ -41,11 +41,8 @@ pub struct CameraController {
     // Input state
     input: InputState,
 
-    // Orbit camera parameters
-    pub target: glam::Vec3, // Center point to orbit around
-    pub distance: f32,      // Distance from the target
-    pub theta: f32,         // Horizontal angle (yaw)
-    pub phi: f32,           // Vertical angle (pitch)
+    // Orbit camera
+    camera: OrbitCamera,
 
     // Window and GUI layout tracking
     window_size: glam::Vec2,
@@ -54,14 +51,17 @@ pub struct CameraController {
 
 impl CameraController {
     pub fn new(target: glam::Vec3, initial_distance: f32) -> Self {
+        let mut camera = OrbitCamera::new(1.0, 60.0_f32.to_radians(), 0.1, 1000.0);
+        camera.target = target;
+        camera.distance = initial_distance;
+        camera.theta = INITIAL_THETA;
+        camera.phi = INITIAL_PHI;
+
         Self {
             sensitivity: 0.005,
             zoom_speed: 0.1,
             input: InputState::default(),
-            target,
-            distance: initial_distance,
-            theta: INITIAL_THETA,
-            phi: INITIAL_PHI,
+            camera,
             window_size: glam::Vec2::new(1024.0, 768.0),
             gui_width: GUI_WIDTH,
         }
@@ -122,10 +122,11 @@ impl CameraController {
         if self.input.is_mouse_pressed {
             // Left mouse: orbit camera around target
             let delta = new_pos - self.input.last_mouse_pos;
-            self.theta -= delta.x * self.sensitivity;
-            self.theta = self.theta.rem_euclid(2.0 * PI);
-            self.phi -= delta.y * self.sensitivity;
-            self.phi = self.phi.clamp(
+            self.camera.theta -= delta.x * self.sensitivity;
+            self.camera.theta = self.camera.theta.rem_euclid(2.0 * PI);
+            
+            self.camera.phi -= delta.y * self.sensitivity;
+            self.camera.phi = self.camera.phi.clamp(
                 -std::f32::consts::FRAC_PI_2 + 1e-4,
                 std::f32::consts::FRAC_PI_2 - 1e-4,
             );
@@ -134,8 +135,8 @@ impl CameraController {
         } else if self.input.is_right_mouse_pressed {
             // Right mouse: zoom in/out
             let delta = new_pos - self.input.last_mouse_pos;
-            let zoom_amount = -delta.y * self.sensitivity * self.distance * 0.5;
-            self.distance = (self.distance + zoom_amount).clamp(0.1, f32::MAX);
+            let zoom_amount = -delta.y * self.sensitivity * self.camera.distance * 0.5;
+            self.camera.distance = (self.camera.distance + zoom_amount).clamp(0.1, f32::MAX);
             self.input.last_mouse_pos = new_pos;
             true
         } else if self.input.is_middle_mouse_pressed {
@@ -146,7 +147,7 @@ impl CameraController {
             let camera_vectors = self.calculate_camera_vectors();
 
             // Scale the panning based on distance (closer = smaller movements, farther = larger movements)
-            let pan_scale = self.distance * 0.001;
+            let pan_scale = self.camera.distance * 0.001;
 
             // Move target:
             // - Mouse right = view pans right (target moves left relative to camera)
@@ -154,7 +155,7 @@ impl CameraController {
             let right_movement = camera_vectors.right * (-delta.x * pan_scale);
             let up_movement = camera_vectors.up * (delta.y * pan_scale);
 
-            self.target += right_movement + up_movement;
+            self.camera.target += right_movement + up_movement;
             self.input.last_mouse_pos = new_pos;
             true
         } else {
@@ -168,8 +169,8 @@ impl CameraController {
             MouseScrollDelta::LineDelta(_, y) => -y * self.zoom_speed,
             MouseScrollDelta::PixelDelta(pos) => -pos.y as f32 * 0.01 * self.zoom_speed,
         };
-        let zoom_amount = base_zoom * self.distance;
-        self.distance = (self.distance + zoom_amount).clamp(0.1, f32::MAX);
+        let zoom_amount = base_zoom * self.camera.distance;
+        self.camera.distance = (self.camera.distance + zoom_amount).clamp(0.1, f32::MAX);
     }
 
     pub fn process_events(&mut self, event: &WindowEvent) -> bool {
@@ -190,24 +191,32 @@ impl CameraController {
     }
 
     fn calculate_camera_vectors(&self) -> CameraVectors {
-        let right = glam::Vec3::new(-self.theta.cos(), -self.theta.sin(), 0.0).normalize();
+        let theta = self.camera.theta;
+        let phi = self.camera.phi;
+        let right = glam::Vec3::new(-theta.cos(), -theta.sin(), 0.0).normalize();
         let up = glam::Vec3::new(
-            -self.phi.sin() * self.theta.sin(),
-            self.phi.sin() * self.theta.cos(),
-            self.phi.cos(),
+            -phi.sin() * theta.sin(),
+            phi.sin() * theta.cos(),
+            phi.cos(),
         )
         .normalize();
         CameraVectors { right, up }
     }
 
     pub fn update(&mut self, camera: &mut OrbitCamera) {
-        self.distance = self.distance.clamp(0.1, f32::MAX);
-        camera.update_view(self.target, self.distance, self.theta, self.phi);
+        self.camera.distance = self.camera.distance.clamp(0.1, f32::MAX);
+        
+        camera.update_view(
+            self.camera.target,
+            self.camera.distance,
+            self.camera.theta,
+            self.camera.phi
+        );
     }
 
-    /// Get both angles in radians
-    pub fn get_angles(&self) -> (f32, f32) {
-        (self.theta, self.phi)
+    /// Get the camera target
+    pub fn get_target(&self) -> glam::Vec3 {
+        self.camera.target
     }
 }
 

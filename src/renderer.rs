@@ -13,28 +13,6 @@ pub struct Vertex {
     position: [f32; 3],
     color: [f32; 3],
 }
-
-impl Vertex {
-    pub fn desc() -> wgpu::VertexBufferLayout<'static> {
-        wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &[
-                wgpu::VertexAttribute {
-                    offset: 0,
-                    shader_location: 0,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-                wgpu::VertexAttribute {
-                    offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
-                    shader_location: 1,
-                    format: wgpu::VertexFormat::Float32x3,
-                },
-            ],
-        }
-    }
-}
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CropUniform {
@@ -108,9 +86,9 @@ impl Renderer {
     pub async fn new(window: std::sync::Arc<Window>, pointcloud: &PointCloud) -> Self {
         let size = window.inner_size();
         let initial_target = glam::Vec3::new(
-            (pointcloud.max_coord[0] + pointcloud.min_coord[0]) / 2.0,
-            (pointcloud.max_coord[1] + pointcloud.min_coord[1]) / 2.0,
-            pointcloud.min_coord[2],
+            (pointcloud.max_coord.x + pointcloud.min_coord.x) / 2.0,
+            (pointcloud.max_coord.y + pointcloud.min_coord.y) / 2.0,
+            pointcloud.min_coord.z,
         );
         let max_extent = pointcloud
             .size
@@ -118,7 +96,6 @@ impl Renderer {
             .max(pointcloud.size.y)
             .max(pointcloud.size.z);
         let z_far = max_extent * 20.0;
-        // Initialize WGPU resources
         let (surface, device, queue, config) = Self::init_wgpu(window.clone(), size).await;
 
         // Setup camera
@@ -132,34 +109,18 @@ impl Renderer {
         // Initial camera distance is calculated as the distance at which the frustum
         // plane has a width equal to the maximum horizontal size of the model.
         // d = (modelMaxHSize / (2tan(fov))) + (horizontalSize / 2)
-        let initial_distance = (pointcloud.size.x / 2.0) / (camera.get_fov() / 2.0).tan();
+        let initial_distance = (pointcloud.size.x / 2.0) / (camera.fov / 2.0).tan();
         let mut camera_controller = CameraController::new(initial_target, initial_distance);
-
-        // Set up initial layout information for camera controller
-        let window_size = glam::Vec2::new(size.width as f32, size.height as f32);
-        camera_controller.set_window_size(window_size);
-
-        // Calculate initial crop bounds from pointcloud
-        let mut crop_min = glam::Vec3::new(f32::MAX, f32::MAX, f32::MAX);
-        let mut crop_max = glam::Vec3::new(f32::MIN, f32::MIN, f32::MIN);
-
-        for i in 0..pointcloud.points.len() {
-            let x = pointcloud.points[i].x;
-            let y = pointcloud.points[i].y;
-            let z = pointcloud.points[i].z;
-
-            crop_min.x = crop_min.x.min(x);
-            crop_min.y = crop_min.y.min(y);
-            crop_min.z = crop_min.z.min(z);
-
-            crop_max.x = crop_max.x.max(x);
-            crop_max.y = crop_max.y.max(y);
-            crop_max.z = crop_max.z.max(z);
-        }
+        camera_controller.set_window_size(glam::Vec2::new(size.width as f32, size.height as f32));
 
         // Setup camera uniforms
         let (vp_mat, camera_buffer, camera_bind_group, camera_bind_group_layout, crop_buffer) =
-            Self::setup_camera_uniforms(&device, &camera, crop_min, crop_max);
+            Self::setup_camera_uniforms(
+                &device,
+                &camera,
+                pointcloud.min_coord,
+                pointcloud.max_coord,
+            );
 
         // Create vertex data and buffers
         let vertices = pointcloud
@@ -177,95 +138,15 @@ impl Renderer {
             .collect();
         let (vertex_buffers, vertex_counts) = Self::create_vertex_buffers(&device, vertices);
 
-        // Create axis vertices and buffer
-        let axis_length = 2.0; // Axes are 2m long
-        let axis_vertices = {
-            let axis_length = axis_length;
-            vec![
-                // X-axis (Red)
-                Vertex {
-                    position: [0.0, 0.0, 0.0],
-                    color: [1.0, 0.0, 0.0],
-                },
-                Vertex {
-                    position: [axis_length, 0.0, 0.0],
-                    color: [1.0, 0.0, 0.0],
-                },
-                // Y-axis (Green)
-                Vertex {
-                    position: [0.0, 0.0, 0.0],
-                    color: [0.0, 1.0, 0.0],
-                },
-                Vertex {
-                    position: [0.0, axis_length, 0.0],
-                    color: [0.0, 1.0, 0.0],
-                },
-                // Z-axis (Blue)
-                Vertex {
-                    position: [0.0, 0.0, 0.0],
-                    color: [0.0, 0.0, 1.0],
-                },
-                Vertex {
-                    position: [0.0, 0.0, axis_length],
-                    color: [0.0, 0.0, 1.0],
-                },
-            ]
-        };
-        let axis_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Axis Vertex Buffer"),
-            contents: bytemuck::cast_slice(&axis_vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let axis_vertex_count = axis_vertices.len() as u32;
+        let (axis_vertex_buffer, axis_vertex_count) = Self::get_origin_vertices(&device);
 
         // Create target disc vertices and buffer
-        let target_disc_vertices = {
-            let disc_radius = 0.5;
-            let segments = 4;
-            let mut vertices = Vec::new();
-            let center = [0.0, 0.0, 0.0];
-            let color = [0.0, 0.0, 8.0]; // Blue color for the target disc
-
-            // Create disc as a series of lines from center to edge points
-            for i in 0..segments {
-                let angle = 2.0 * std::f32::consts::PI * i as f32 / segments as f32;
-                let x = disc_radius * angle.cos();
-                let y = disc_radius * angle.sin();
-
-                // Line from center to edge
-                vertices.push(Vertex {
-                    position: center,
-                    color,
-                });
-                vertices.push(Vertex {
-                    position: [x, y, 0.0],
-                    color,
-                });
-
-                // Line to next point (creating the outer ring)
-                let next_angle =
-                    2.0 * std::f32::consts::PI * ((i + 1) % segments) as f32 / segments as f32;
-                let next_x = disc_radius * next_angle.cos();
-                let next_y = disc_radius * next_angle.sin();
-
-                vertices.push(Vertex {
-                    position: [x, y, 0.0],
-                    color,
-                });
-                vertices.push(Vertex {
-                    position: [next_x, next_y, 0.0],
-                    color,
-                });
-            }
-
-            vertices
-        };
-        let target_disc_vertex_buffer =
-            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Target Disc Vertex Buffer"),
-                contents: bytemuck::cast_slice(&target_disc_vertices),
-                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST, // Allow updates
-            });
+        let target_disc_vertices = Self::get_target_disc_vertices();
+        let target_disc_vertex_buffer = Self::create_updatable_vertex_buffer(
+            &device,
+            &target_disc_vertices,
+            "Target Disc Vertex Buffer",
+        );
         let target_disc_vertex_count = target_disc_vertices.len() as u32;
 
         let render_pipeline =
@@ -301,6 +182,126 @@ impl Renderer {
             window,
             z_far,
         }
+    }
+
+    fn get_axis_vertices() -> Vec<Vertex> {
+        let axis_length = 2.0; // Axes are 2m long
+        vec![
+            // X-axis (Red)
+            Vertex {
+                position: [0.0, 0.0, 0.0],
+                color: [1.0, 0.0, 0.0],
+            },
+            Vertex {
+                position: [axis_length, 0.0, 0.0],
+                color: [1.0, 0.0, 0.0],
+            },
+            // Y-axis (Green)
+            Vertex {
+                position: [0.0, 0.0, 0.0],
+                color: [0.0, 1.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, axis_length, 0.0],
+                color: [0.0, 1.0, 0.0],
+            },
+            // Z-axis (Blue)
+            Vertex {
+                position: [0.0, 0.0, 0.0],
+                color: [0.0, 0.0, 1.0],
+            },
+            Vertex {
+                position: [0.0, 0.0, axis_length],
+                color: [0.0, 0.0, 1.0],
+            },
+        ]
+    }
+
+    fn get_origin_vertices(device: &wgpu::Device) -> (wgpu::Buffer, u32) {
+        let axis_vertices = Self::get_axis_vertices();
+        let axis_vertex_buffer =
+            Self::create_vertex_buffer(&device, &axis_vertices, "Axis Vertex Buffer");
+        let axis_vertex_count = axis_vertices.len() as u32;
+
+        (axis_vertex_buffer, axis_vertex_count)
+    }
+
+    fn create_vertex_buffer(
+        device: &wgpu::Device,
+        vertices: &[Vertex],
+        label: &str,
+    ) -> wgpu::Buffer {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX,
+        })
+    }
+
+    fn create_updatable_vertex_buffer(
+        device: &wgpu::Device,
+        vertices: &[Vertex],
+        label: &str,
+    ) -> wgpu::Buffer {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::cast_slice(vertices),
+            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        })
+    }
+
+    fn create_uniform_buffer<T: bytemuck::Pod>(
+        device: &wgpu::Device,
+        data: &[T],
+        label: &str,
+    ) -> wgpu::Buffer {
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some(label),
+            contents: bytemuck::cast_slice(data),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        })
+    }
+
+    fn get_target_disc_vertices() -> Vec<Vertex> {
+        let disc_radius = 0.5;
+        let segments = 4;
+        let mut vertices = Vec::new();
+        let center = [0.0, 0.0, 0.0];
+        let color = [0.0, 0.0, 8.0]; // Blue color for the target disc
+
+        // Create disc as a series of lines from center to edge points
+        for i in 0..segments {
+            let angle = 2.0 * std::f32::consts::PI * i as f32 / segments as f32;
+            let x = disc_radius * angle.cos();
+            let y = disc_radius * angle.sin();
+
+            // Line from center to edge
+            vertices.push(Vertex {
+                position: center,
+                color,
+            });
+            vertices.push(Vertex {
+                position: [x, y, 0.0],
+                color,
+            });
+
+            // Line to next point (creating the outer ring)
+            let next_angle =
+                2.0 * std::f32::consts::PI * ((i + 1) % segments) as f32 / segments as f32;
+            let next_x = disc_radius * next_angle.cos();
+            let next_y = disc_radius * next_angle.sin();
+
+            vertices.push(Vertex {
+                position: [x, y, 0.0],
+                color,
+            });
+            vertices.push(Vertex {
+                position: [next_x, next_y, 0.0],
+                color,
+            });
+        }
+
+        vertices
     }
 
     async fn init_wgpu(
@@ -375,19 +376,10 @@ impl Renderer {
         wgpu::Buffer,
     ) {
         let vp_mat = camera.get_vp_matrix().to_cols_array_2d();
-
-        let camera_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Camera Buffer"),
-            contents: bytemuck::cast_slice(&[vp_mat]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let camera_buffer = Self::create_uniform_buffer(&device, &[vp_mat], "Camera Buffer");
 
         let crop_uniform = CropUniform::new(crop_min, crop_max);
-        let crop_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Crop Buffer"),
-            contents: bytemuck::cast_slice(&[crop_uniform]),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
+        let crop_buffer = Self::create_uniform_buffer(&device, &[crop_uniform], "Crop Buffer");
 
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             entries: &[
@@ -460,33 +452,49 @@ impl Renderer {
             buffers.push(buffer);
             counts.push(chunk.len() as u32);
         }
-
-        println!("Created {} vertex buffers", buffers.len());
         (buffers, counts)
     }
 
     // Pipeline Setup
-    fn create_render_pipeline(
+    fn create_render_pipeline_base(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
+        topology: wgpu::PrimitiveTopology,
+        blend_state: wgpu::BlendState,
+        cull_mode: Option<wgpu::Face>,
+        label: &str,
     ) -> wgpu::RenderPipeline {
         let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
-
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
+                label: Some(&format!("{} Layout", label)),
                 bind_group_layouts: &[camera_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
+            label: Some(label),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                buffers: &[Vertex::desc()],
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            offset: 0,
+                            shader_location: 0,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                        wgpu::VertexAttribute {
+                            offset: std::mem::size_of::<[f32; 3]>() as wgpu::BufferAddress,
+                            shader_location: 1,
+                            format: wgpu::VertexFormat::Float32x3,
+                        },
+                    ],
+                }],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
@@ -494,16 +502,16 @@ impl Renderer {
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(blend_state),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
             primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::PointList,
+                topology,
                 strip_index_format: None,
                 front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
+                cull_mode,
                 polygon_mode: wgpu::PolygonMode::Fill,
                 unclipped_depth: false,
                 conservative: false,
@@ -517,6 +525,22 @@ impl Renderer {
             multiview: None,
             cache: None,
         })
+    }
+
+    fn create_render_pipeline(
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        camera_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> wgpu::RenderPipeline {
+        Self::create_render_pipeline_base(
+            device,
+            config,
+            camera_bind_group_layout,
+            wgpu::PrimitiveTopology::PointList,
+            wgpu::BlendState::ALPHA_BLENDING,
+            Some(wgpu::Face::Back),
+            "Render Pipeline",
+        )
     }
 
     fn create_line_render_pipeline(
@@ -524,52 +548,15 @@ impl Renderer {
         config: &wgpu::SurfaceConfiguration,
         camera_bind_group_layout: &wgpu::BindGroupLayout,
     ) -> wgpu::RenderPipeline {
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
-
-        let render_pipeline_layout =
-            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Line Render Pipeline Layout"),
-                bind_group_layouts: &[camera_bind_group_layout],
-                push_constant_ranges: &[],
-            });
-
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Line Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[Vertex::desc()],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: config.format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::LineList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None, // Don't cull lines
-                polygon_mode: wgpu::PolygonMode::Fill,
-                unclipped_depth: false,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                count: 1,
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-            },
-            multiview: None,
-            cache: None,
-        })
+        Self::create_render_pipeline_base(
+            device,
+            config,
+            camera_bind_group_layout,
+            wgpu::PrimitiveTopology::LineList,
+            wgpu::BlendState::REPLACE,
+            None,
+            "Line Render Pipeline",
+        )
     }
 
     // window resize callback
@@ -580,18 +567,17 @@ impl Renderer {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
 
-            // Calculate aspect ratio based on drawable area (excluding fixed GUI panel)
-            const GUI_PANEL_WIDTH: f32 = 250.0;
-            let drawable_width = new_size.width as f32 - GUI_PANEL_WIDTH;
-            let drawable_height = new_size.height as f32;
-            let drawable_aspect = drawable_width / drawable_height;
+            self.camera.update_proj(
+                CAMERA_FOV,
+                new_size.width as f32 / new_size.height as f32,
+                Z_NEAR,
+                self.z_far,
+            );
 
-            self.camera
-                .update_proj(CAMERA_FOV, drawable_aspect, Z_NEAR, self.z_far);
-
-            // Update camera controller layout information
-            let window_size = glam::Vec2::new(new_size.width as f32, new_size.height as f32);
-            self.camera_controller.set_window_size(window_size);
+            self.camera_controller.set_window_size(glam::Vec2::new(
+                new_size.width as f32,
+                new_size.height as f32,
+            ));
         }
     }
 
@@ -619,7 +605,7 @@ impl Renderer {
         {
             let this = &mut *self;
             // Transform the disc vertices to the current target position
-            let target_pos = this.camera_controller.target;
+            let target_pos = this.camera_controller.get_target();
             let mut transformed_vertices = Vec::new();
 
             for vertex in &this.target_disc_vertices {
@@ -722,7 +708,7 @@ impl Renderer {
         Ok(())
     }
 
-    pub fn render_with_egui(
+    pub fn render_egui(
         &mut self,
         egui_renderer: &mut egui_wgpu::Renderer,
         egui_ctx: &egui::Context,
@@ -824,10 +810,6 @@ impl Renderer {
 
     pub fn get_camera(&self) -> &OrbitCamera {
         &self.camera
-    }
-
-    pub fn get_camera_controller(&self) -> &CameraController {
-        &self.camera_controller
     }
 
     pub fn get_device(&self) -> &wgpu::Device {

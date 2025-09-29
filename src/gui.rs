@@ -1,3 +1,4 @@
+use crate::camera::OrbitCamera;
 use egui::{Context, SidePanel};
 
 pub const GUI_WIDTH: f32 = 250.0;
@@ -6,30 +7,23 @@ pub const GUI_WIDTH: f32 = 250.0;
 pub struct GuiState {
     pub show_axes: bool,
     pub show_target_disc: bool,
-    pub camera_info: CameraInfo,
+    pub camera_info: OrbitCamera,
+
     // Point cloud cropping
     pub crop_min: glam::Vec3, // minimum bounds
     pub crop_max: glam::Vec3, // maximum bounds
+
     // Point cloud bounds (updated from the loaded point cloud)
     pub pointcloud_min: glam::Vec3,
     pub pointcloud_max: glam::Vec3,
+
     // Ground plane alignment
     pub reset_alignment_requested: bool,
-    // Point selection mode
     pub point_selection_mode: bool,
-    pub selected_ground_point: Option<glam::Vec3>,
     pub point_selection_failed: bool,
+
     // Export button
     pub export_pcd_requested: bool,
-}
-
-#[derive(Default)]
-pub struct CameraInfo {
-    pub position: [f32; 3],
-    pub target: [f32; 3],
-    pub distance: f32,
-    pub theta: f32, // Horizontal angle (yaw) in radians
-    pub phi: f32,   // Vertical angle (pitch) in radians
 }
 
 impl GuiState {
@@ -37,50 +31,24 @@ impl GuiState {
         Self {
             show_axes: true,
             show_target_disc: true,
-            camera_info: CameraInfo::default(),
+            camera_info: OrbitCamera::default(),
             crop_min: glam::Vec3::new(-100.0, -100.0, -100.0),
             crop_max: glam::Vec3::new(100.0, 100.0, 100.0),
             pointcloud_min: glam::Vec3::new(-100.0, -100.0, -100.0),
             pointcloud_max: glam::Vec3::new(100.0, 100.0, 100.0),
             reset_alignment_requested: false,
             point_selection_mode: false,
-            selected_ground_point: None,
             point_selection_failed: false,
             export_pcd_requested: false,
         }
     }
 
-    pub fn update_camera_info(
-        &mut self,
-        position: [f32; 3],
-        target: [f32; 3],
-        distance: f32,
-        theta: f32,
-        phi: f32,
-    ) {
-        self.camera_info.position = position;
-        self.camera_info.target = target;
-        self.camera_info.distance = distance;
-        self.camera_info.theta = theta;
-        self.camera_info.phi = phi;
-    }
-
-    pub fn update_pointcloud_bounds(&mut self, min_coords: glam::Vec3, max_coords: glam::Vec3) {
-        self.pointcloud_min = min_coords;
-        self.pointcloud_max = max_coords;
-        // Initialize crop bounds to full range if they're still at default values
-        let defaults = (
-            glam::Vec3::new(-100.0, -100.0, -100.0),
-            glam::Vec3::new(100.0, 100.0, 100.0),
-        );
-        if (self.crop_min, self.crop_max) == defaults {
-            (self.crop_min, self.crop_max) = (min_coords, max_coords);
-        }
+    pub fn update_camera_info(&mut self, camera_info: &OrbitCamera) {
+        self.camera_info = camera_info.clone();
     }
 
     pub fn reset_crop(&mut self) {
-        self.crop_min = self.pointcloud_min;
-        self.crop_max = self.pointcloud_max;
+        (self.crop_min, self.crop_max) = (self.pointcloud_min, self.pointcloud_max);
     }
 
     pub fn render(&mut self, ctx: &Context) {
@@ -105,11 +73,10 @@ impl GuiState {
                         if self.point_selection_mode {
                             ui.colored_label(
                                 egui::Color32::YELLOW,
-                                "Click on a surface in the 3D view to align it to the ground plane",
+                                "Click on a surface in the 3D view to align it to the ground plane. Hint: Choose a surface with a high point density.",
                             );
                             if ui.button("Cancel").clicked() {
                                 self.point_selection_mode = false;
-                                self.selected_ground_point = None;
                                 self.point_selection_failed = false;
                             }
                             if self.point_selection_failed {
@@ -118,14 +85,12 @@ impl GuiState {
                         } else {
                             if ui.button("Align to Ground").clicked() {
                                 self.point_selection_mode = true;
-                                self.selected_ground_point = None;
                                 self.point_selection_failed = false;
                             }
                         }
                         if ui.button("Reset alignment").clicked() {
                             self.reset_alignment_requested = true;
                             self.point_selection_mode = false;
-                            self.selected_ground_point = None;
                             self.point_selection_failed = false;
                         }
                     });
@@ -213,18 +178,17 @@ impl GuiState {
                         ui.label("Target:");
                         ui.label(format!(
                             "({:.1}, {:.1}, {:.1})",
-                            self.camera_info.target[0],
-                            self.camera_info.target[1],
-                            self.camera_info.target[2]
+                            self.camera_info.target.x,
+                            self.camera_info.target.y,
+                            self.camera_info.target.z
                         ));
                     });
                     ui.horizontal(|ui| {
+                        let eye = self.camera_info.get_eye();
                         ui.label("Position:");
                         ui.label(format!(
                             "({:.1}, {:.1}, {:.1})",
-                            self.camera_info.position[0],
-                            self.camera_info.position[1],
-                            self.camera_info.position[2]
+                            eye.x, eye.y, eye.z
                         ));
                     });
                     ui.horizontal(|ui| {
@@ -259,11 +223,6 @@ impl GuiState {
         let ret = self.reset_alignment_requested.clone();
         self.reset_alignment_requested = false;
         ret
-    }
-
-    /// Set a selected ground point and exit point selection mode
-    pub fn set_ground_point(&mut self, point: glam::Vec3) {
-        self.selected_ground_point = Some(point);
     }
 
     /// Check if export PCD was requested and reset the flag
