@@ -1,4 +1,5 @@
 use std::f32::consts::PI;
+use gui::GUI_WIDTH;
 
 use winit::{
     event::*,
@@ -61,8 +62,8 @@ impl CameraController {
             distance: initial_distance,
             theta: INITIAL_THETA,
             phi: INITIAL_PHI,
-            window_size: glam::Vec2::new(1024.0, 768.0), // Default window size
-            gui_width: 300.0,                            // Default GUI panel width
+            window_size: glam::Vec2::new(1024.0, 768.0),
+            gui_width: GUI_WIDTH,
         }
     }
 
