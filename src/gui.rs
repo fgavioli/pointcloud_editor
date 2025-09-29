@@ -14,14 +14,11 @@ pub struct GuiState {
     pub pointcloud_min: glam::Vec3,
     pub pointcloud_max: glam::Vec3,
     // Ground plane alignment
-    pub alignment_requested: bool,
     pub reset_alignment_requested: bool,
     // Point selection mode
     pub point_selection_mode: bool,
     pub selected_ground_point: Option<glam::Vec3>,
     pub point_selection_failed: bool,
-    // Alignment progress
-    pub alignment_in_progress: bool,
     // Export button
     pub export_pcd_requested: bool,
 }
@@ -45,12 +42,10 @@ impl GuiState {
             crop_max: glam::Vec3::new(100.0, 100.0, 100.0),
             pointcloud_min: glam::Vec3::new(-100.0, -100.0, -100.0),
             pointcloud_max: glam::Vec3::new(100.0, 100.0, 100.0),
-            alignment_requested: false,
             reset_alignment_requested: false,
             point_selection_mode: false,
             selected_ground_point: None,
             point_selection_failed: false,
-            alignment_in_progress: false,
             export_pcd_requested: false,
         }
     }
@@ -83,7 +78,7 @@ impl GuiState {
         }
     }
 
-    pub fn reset_crop_bounds_to_full_range(&mut self) {
+    pub fn reset_crop(&mut self) {
         self.crop_min = self.pointcloud_min;
         self.crop_max = self.pointcloud_max;
     }
@@ -110,7 +105,7 @@ impl GuiState {
                         if self.point_selection_mode {
                             ui.colored_label(
                                 egui::Color32::YELLOW,
-                                "Click on a point in the 3D view to align ground plane",
+                                "Click on a surface in the 3D view to align it to the ground plane",
                             );
                             if ui.button("Cancel").clicked() {
                                 self.point_selection_mode = false;
@@ -259,50 +254,22 @@ impl GuiState {
             });
     }
 
-    /// Check if alignment was requested and reset the flag
-    pub fn take_alignment_request(&mut self) -> bool {
-        std::mem::take(&mut self.alignment_requested)
-    }
-
     /// Check if reset alignment was requested and reset the flag
-    pub fn take_reset_alignment_request(&mut self) -> bool {
-        std::mem::take(&mut self.reset_alignment_requested)
-    }
-
-    /// Check if we're in point selection mode
-    pub fn is_point_selection_mode(&self) -> bool {
-        self.point_selection_mode
+    pub fn try_consume_alignment_request(&mut self) -> bool {
+        let ret = self.reset_alignment_requested.clone();
+        self.reset_alignment_requested = false;
+        ret
     }
 
     /// Set a selected ground point and exit point selection mode
     pub fn set_ground_point(&mut self, point: glam::Vec3) {
         self.selected_ground_point = Some(point);
-        // Don't exit point selection mode here - let the user decide what to do next
-        // self.point_selection_mode = false;
-    }
-
-    /// Get the selected ground point
-    pub fn get_selected_ground_point(&self) -> Option<glam::Vec3> {
-        self.selected_ground_point
-    }
-
-    /// Set point selection as failed (no valid point found)
-    pub fn set_point_selection_failed(&mut self) {
-        self.point_selection_failed = true;
-    }
-
-    /// Start alignment progress
-    pub fn start_alignment_progress(&mut self) {
-        self.alignment_in_progress = true;
-    }
-
-    /// Stop alignment progress
-    pub fn stop_alignment_progress(&mut self) {
-        self.alignment_in_progress = false;
     }
 
     /// Check if export PCD was requested and reset the flag
-    pub fn take_export_pcd_request(&mut self) -> bool {
-        std::mem::take(&mut self.export_pcd_requested)
+    pub fn try_consume_export_pcd(&mut self) -> bool {
+        let ret = self.export_pcd_requested.clone();
+        self.export_pcd_requested = false;
+        ret
     }
 }

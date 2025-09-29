@@ -595,7 +595,7 @@ impl Renderer {
         }
     }
 
-    pub fn input(&mut self, event: &WindowEvent) -> bool {
+    pub fn on_window_event(&mut self, event: &WindowEvent) -> bool {
         self.camera_controller.process_events(event)
     }
 
@@ -873,7 +873,5 @@ impl Renderer {
         // Replace the old buffers
         self.vertex_buffers = new_vertex_buffers;
         self.vertex_counts = new_vertex_counts;
-
-        println!("Vertex buffers updated successfully");
     }
 }

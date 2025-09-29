@@ -2,11 +2,11 @@
 use crate::gui::GuiState;
 use crate::pointcloud::{align_to_ground, find_closest_point_to_ray, PointCloud};
 use crate::renderer::Renderer;
-use std::{sync::Arc};
+use std::sync::Arc;
 use winit::{
     application::ApplicationHandler,
     event::*,
-    event_loop::{ActiveEventLoop},
+    event_loop::ActiveEventLoop,
     window::{Window, WindowId},
 };
 
@@ -74,7 +74,7 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
-        // update
+        // reload vertex data if marked for update
         if self.reload_vertices {
             if let Some(ref mut renderer) = self.renderer {
                 renderer.update_point_cloud(&self.current_pointcloud);
@@ -82,8 +82,6 @@ impl ApplicationHandler for App {
                 renderer.update_crop_bounds(self.gui_state.crop_min, self.gui_state.crop_max);
             }
             self.reload_vertices = false;
-            // Stop progress dialog after vertex update is complete
-            self.gui_state.stop_alignment_progress();
         }
         let mut consumed_by_egui = false;
         if let Some(ref mut renderer) = self.renderer {
@@ -100,7 +98,7 @@ impl ApplicationHandler for App {
                 }
 
                 // Only process mouse clicks for point selection if egui didn't consume the event
-                if !consumed_by_egui && self.gui_state.is_point_selection_mode() {
+                if !consumed_by_egui && self.gui_state.point_selection_mode {
                     if let WindowEvent::MouseInput {
                         button: winit::event::MouseButton::Left,
                         state: ElementState::Pressed,
@@ -125,10 +123,31 @@ impl ApplicationHandler for App {
                                 0.5, // Max distance threshold in world units
                             ) {
                                 self.gui_state.set_ground_point(closest_point);
-                                self.gui_state.alignment_requested = true;
+
+                                // Perform alignment directly
+                                println!(
+                                    "Aligning point cloud to ground plane at selected point..."
+                                );
+                                let aligned_pointcloud = align_to_ground(
+                                    &self.original_pointcloud,
+                                    closest_point,
+                                    glam::Vec3::new(1.25, 1.25, 0.75),
+                                );
+                                self.current_pointcloud = aligned_pointcloud;
+
+                                // Update GUI bounds with the aligned point cloud
+                                self.gui_state.update_pointcloud_bounds(
+                                    glam::Vec3::from(self.current_pointcloud.min_coord),
+                                    glam::Vec3::from(self.current_pointcloud.max_coord),
+                                );
+                                self.gui_state.reset_crop();
+
+                                // Mark that we need to update vertex data
+                                self.reload_vertices = true;
+
                                 self.gui_state.point_selection_mode = false; // Exit point selection mode
                             } else {
-                                self.gui_state.set_point_selection_failed();
+                                self.gui_state.point_selection_failed = true;
                             }
                         }
                         return; // Don't process this event further
@@ -136,7 +155,7 @@ impl ApplicationHandler for App {
                 }
             }
 
-            if !consumed_by_egui && !renderer.input(&event) {
+            if !consumed_by_egui && !renderer.on_window_event(&event) {
                 match event {
                     WindowEvent::CloseRequested
                     | WindowEvent::KeyboardInput {
@@ -197,43 +216,8 @@ impl ApplicationHandler for App {
                                 self.gui_state.crop_max,
                             );
 
-                            // Handle ground plane alignment requests
-                            if self.gui_state.take_alignment_request() {
-                                if let Some(ground_point) =
-                                    self.gui_state.get_selected_ground_point()
-                                {
-                                    println!(
-                                        "Aligning point cloud to ground plane at selected point..."
-                                    );
-
-                                    // Start progress dialog
-                                    self.gui_state.start_alignment_progress();
-
-                                    let aligned_pointcloud = align_to_ground(
-                                        &self.original_pointcloud,
-                                        ground_point,
-                                        glam::Vec3::new(2.0, 2.0, 4.0),
-                                    );
-                                    self.current_pointcloud = aligned_pointcloud;
-
-                                    // Update GUI bounds with the aligned point cloud
-                                    self.gui_state.update_pointcloud_bounds(
-                                        glam::Vec3::from(self.current_pointcloud.min_coord),
-                                        glam::Vec3::from(self.current_pointcloud.max_coord),
-                                    );
-                                    self.gui_state.reset_crop_bounds_to_full_range();
-
-                                    // Mark that we need to update vertex data
-                                    self.reload_vertices = true;
-
-                                    // Progress dialog will be stopped after vertex update is complete
-
-                                    println!("Ground plane alignment completed");
-                                } else {
-                                    println!("No ground point selected for alignment");
-                                }
-                            } // Handle reset alignment requests
-                            if self.gui_state.take_reset_alignment_request() {
+                            // Handle reset alignment requests
+                            if self.gui_state.try_consume_alignment_request() {
                                 println!("Resetting point cloud alignment...");
                                 // Reset to original point cloud
                                 self.current_pointcloud = self.original_pointcloud.clone();
@@ -243,21 +227,20 @@ impl ApplicationHandler for App {
                                     glam::Vec3::from(self.current_pointcloud.min_coord),
                                     glam::Vec3::from(self.current_pointcloud.max_coord),
                                 );
-                                self.gui_state.reset_crop_bounds_to_full_range();
+                                self.gui_state.reset_crop();
 
                                 // Mark that we need to update vertex data
                                 self.reload_vertices = true;
                             }
 
                             // Handle export PCD requests
-                            if self.gui_state.take_export_pcd_request() {
+                            if self.gui_state.try_consume_export_pcd() {
                                 println!("Export PCD requested...");
 
-                                // Open file dialog to choose save location
                                 if let Some(path) = rfd::FileDialog::new()
                                     .set_title("Save Point Cloud")
                                     .add_filter("PCD Files", &["pcd"])
-                                    .set_file_name("exported_pointcloud.pcd")
+                                    .set_file_name("exported.pcd")
                                     .save_file()
                                 {
                                     if let Some(path_str) = path.to_str() {
