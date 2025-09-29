@@ -103,14 +103,14 @@ impl ApplicationHandler for App {
             // Stop progress dialog after vertex update is complete
             self.gui_state.stop_alignment_progress();
         }
-
+        let mut consumed_by_egui = false;
         if let Some(ref mut renderer) = self.renderer {
             // Handle point selection before other input processing
             if let (Some(ref mut egui_state), Some(ref window)) =
                 (&mut self.egui_state, &self.window)
             {
                 // Check if we should process this event for point selection
-                let consumed_by_egui = egui_state.on_window_event(window.as_ref(), &event).consumed;
+                consumed_by_egui = egui_state.on_window_event(window.as_ref(), &event).consumed;
 
                 // Track cursor movement
                 if let WindowEvent::CursorMoved { position, .. } = event {
@@ -154,7 +154,7 @@ impl ApplicationHandler for App {
                 }
             }
 
-            if !renderer.input(&event) {
+            if !consumed_by_egui && !renderer.input(&event) {
                 match event {
                     WindowEvent::CloseRequested
                     | WindowEvent::KeyboardInput {
