@@ -170,7 +170,6 @@ pub struct Renderer {
     camera_bind_group: wgpu::BindGroup,
     // Crop uniform
     crop_buffer: wgpu::Buffer,
-    crop_bind_group: wgpu::BindGroup,
     // Rendering flags
     show_axes: bool,
     show_target_disc: bool,
@@ -239,7 +238,6 @@ impl Renderer {
             camera_bind_group,
             camera_bind_group_layout,
             crop_buffer,
-            crop_bind_group,
         ) = Self::setup_camera_uniforms(&device, &camera, crop_min, crop_max);
 
         // Create vertex data and buffers
@@ -306,7 +304,6 @@ impl Renderer {
             camera_buffer,
             camera_bind_group,
             crop_buffer,
-            crop_bind_group,
             // Initialize rendering flags to true (show by default)
             show_axes: true,
             show_target_disc: true,
@@ -409,7 +406,6 @@ impl Renderer {
         wgpu::BindGroup,
         wgpu::BindGroupLayout,
         wgpu::Buffer,
-        wgpu::BindGroup,
     ) {
         let vp_mat = camera.get_vp_matrix().to_cols_array_2d();
 
@@ -467,28 +463,12 @@ impl Renderer {
             label: Some("camera_bind_group"),
         });
 
-        let crop_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &bind_group_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: camera_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: crop_buffer.as_entire_binding(),
-                },
-            ],
-            label: Some("crop_bind_group"),
-        });
-
         (
             vp_mat,
             camera_buffer,
             camera_bind_group,
             bind_group_layout,
             crop_buffer,
-            crop_bind_group,
         )
     }
 
@@ -685,6 +665,33 @@ impl Renderer {
         self.window.set_title(&title);
     }
 
+    fn render_scene(&mut self, render_pass: &mut wgpu::RenderPass) {
+        // Render point cloud
+        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+
+        for (buffer, &count) in self.vertex_buffers.iter().zip(&self.vertex_counts) {
+            render_pass.set_vertex_buffer(0, buffer.slice(..));
+            render_pass.draw(0..count, 0..1);
+        }
+
+        // Render coordinate axes
+        if self.show_axes {
+            render_pass.set_pipeline(&self.line_render_pipeline);
+            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
+            render_pass.draw(0..self.axis_vertex_count, 0..1);
+        }
+
+        // Render target disc
+        if self.show_target_disc {
+            render_pass.set_pipeline(&self.line_render_pipeline);
+            render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
+            render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
+            render_pass.draw(0..self.target_disc_vertex_count, 0..1);
+        }
+    }
+
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
@@ -718,30 +725,7 @@ impl Renderer {
                 timestamp_writes: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.crop_bind_group, &[]);
-
-            // Render point cloud
-            for (buffer, &count) in self.vertex_buffers.iter().zip(&self.vertex_counts) {
-                render_pass.set_vertex_buffer(0, buffer.slice(..));
-                render_pass.draw(0..count, 0..1);
-            }
-
-            // Render coordinate axes
-            if self.show_axes {
-                render_pass.set_pipeline(&self.line_render_pipeline);
-                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
-                render_pass.draw(0..self.axis_vertex_count, 0..1);
-            }
-
-            // Render target disc
-            if self.show_target_disc {
-                render_pass.set_pipeline(&self.line_render_pipeline);
-                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
-                render_pass.draw(0..self.target_disc_vertex_count, 0..1);
-            }
+            self.render_scene(&mut render_pass);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -789,30 +773,7 @@ impl Renderer {
                 timestamp_writes: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
-            render_pass.set_bind_group(0, &self.crop_bind_group, &[]);
-
-            // Render point cloud
-            for (buffer, &count) in self.vertex_buffers.iter().zip(&self.vertex_counts) {
-                render_pass.set_vertex_buffer(0, buffer.slice(..));
-                render_pass.draw(0..count, 0..1);
-            }
-
-            // Render coordinate axes
-            if self.show_axes {
-                render_pass.set_pipeline(&self.line_render_pipeline);
-                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, self.axis_vertex_buffer.slice(..));
-                render_pass.draw(0..self.axis_vertex_count, 0..1);
-            }
-
-            // Render target disc
-            if self.show_target_disc {
-                render_pass.set_pipeline(&self.line_render_pipeline);
-                render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-                render_pass.set_vertex_buffer(0, self.target_disc_vertex_buffer.slice(..));
-                render_pass.draw(0..self.target_disc_vertex_count, 0..1);
-            }
+            self.render_scene(&mut render_pass);
         }
 
         // Process egui textures (but skip rendering for now)
