@@ -1,5 +1,7 @@
 use egui::{Context, SidePanel};
 
+pub const GUI_WIDTH: f32 = 250.0;
+
 #[derive(Default)]
 pub struct GuiState {
     pub show_axes: bool,

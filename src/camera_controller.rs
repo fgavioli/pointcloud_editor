@@ -1,5 +1,5 @@
 use std::f32::consts::PI;
-use gui::GUI_WIDTH;
+use crate::gui::GUI_WIDTH;
 
 use winit::{
     event::*,
