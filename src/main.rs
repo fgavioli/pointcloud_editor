@@ -324,12 +324,7 @@ impl ApplicationHandler for App {
                             }
 
                             let render_result =
-                                if let Some(ref mut egui_renderer) = self.egui_renderer {
-                                    renderer.render_with_egui(egui_renderer, egui_ctx, &full_output)
-                                } else {
-                                    renderer.render()
-                                };
-
+                                renderer.render_with_egui(self.egui_renderer.as_mut().unwrap(), egui_ctx, &full_output);
                             egui_state
                                 .handle_platform_output(&**window, full_output.platform_output);
                             render_result
