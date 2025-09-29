@@ -1,6 +1,7 @@
 use crate::camera::OrbitCamera;
 use crate::camera_controller::CameraController;
 use crate::PointCloud;
+use crate::gui::GUI_WIDTH;
 use wgpu::util::DeviceExt;
 use winit::{event::*, window::Window};
 
@@ -55,10 +56,7 @@ impl CropUniform {
     }
 }
 
-// ============================================================================
-// UTILITY FUNCTIONS
-// ============================================================================
-
+/// Return a color from a reversed RGB rainbow scaled on the intensity
 fn get_rainbow_color(intensity: u8, min_intensity: u8, max_intensity: u8) -> [f32; 3] {
     let normalized = if max_intensity > min_intensity {
         (intensity - min_intensity) as f32 / (max_intensity - min_intensity) as f32
@@ -73,77 +71,6 @@ fn get_rainbow_color(intensity: u8, min_intensity: u8, max_intensity: u8) -> [f3
         3 => [0.0, 1.0 - ((normalized * 4.0) - 3.0), 1.0], // Cyan to Blue
         _ => [0.0, 0.0, 1.0],                              // Blue
     }
-}
-
-fn create_axis_vertices(axis_length: f32) -> Vec<Vertex> {
-    vec![
-        // X-axis (Red)
-        Vertex {
-            position: [0.0, 0.0, 0.0],
-            color: [1.0, 0.0, 0.0],
-        },
-        Vertex {
-            position: [axis_length, 0.0, 0.0],
-            color: [1.0, 0.0, 0.0],
-        },
-        // Y-axis (Green)
-        Vertex {
-            position: [0.0, 0.0, 0.0],
-            color: [0.0, 1.0, 0.0],
-        },
-        Vertex {
-            position: [0.0, axis_length, 0.0],
-            color: [0.0, 1.0, 0.0],
-        },
-        // Z-axis (Blue)
-        Vertex {
-            position: [0.0, 0.0, 0.0],
-            color: [0.0, 0.0, 1.0],
-        },
-        Vertex {
-            position: [0.0, 0.0, axis_length],
-            color: [0.0, 0.0, 1.0],
-        },
-    ]
-}
-
-fn create_target_disc_vertices(radius: f32, segments: u32) -> Vec<Vertex> {
-    let mut vertices = Vec::new();
-    let center = [0.0, 0.0, 0.0];
-    let color = [0.0, 0.0, 8.0]; // Blue color for the target disc
-
-    // Create disc as a series of lines from center to edge points
-    for i in 0..segments {
-        let angle = 2.0 * std::f32::consts::PI * i as f32 / segments as f32;
-        let x = radius * angle.cos();
-        let y = radius * angle.sin();
-
-        // Line from center to edge
-        vertices.push(Vertex {
-            position: center,
-            color,
-        });
-        vertices.push(Vertex {
-            position: [x, y, 0.0],
-            color,
-        });
-
-        // Line to next point (creating the outer ring)
-        let next_angle = 2.0 * std::f32::consts::PI * ((i + 1) % segments) as f32 / segments as f32;
-        let next_x = radius * next_angle.cos();
-        let next_y = radius * next_angle.sin();
-
-        vertices.push(Vertex {
-            position: [x, y, 0.0],
-            color,
-        });
-        vertices.push(Vertex {
-            position: [next_x, next_y, 0.0],
-            color,
-        });
-    }
-
-    vertices
 }
 
 pub struct Renderer {
@@ -258,7 +185,38 @@ impl Renderer {
 
         // Create axis vertices and buffer
         let axis_length = 2.0; // Axes are 2m long
-        let axis_vertices = create_axis_vertices(axis_length);
+        let axis_vertices = {
+            let axis_length = axis_length;
+            vec![
+                // X-axis (Red)
+                Vertex {
+                    position: [0.0, 0.0, 0.0],
+                    color: [1.0, 0.0, 0.0],
+                },
+                Vertex {
+                    position: [axis_length, 0.0, 0.0],
+                    color: [1.0, 0.0, 0.0],
+                },
+                // Y-axis (Green)
+                Vertex {
+                    position: [0.0, 0.0, 0.0],
+                    color: [0.0, 1.0, 0.0],
+                },
+                Vertex {
+                    position: [0.0, axis_length, 0.0],
+                    color: [0.0, 1.0, 0.0],
+                },
+                // Z-axis (Blue)
+                Vertex {
+                    position: [0.0, 0.0, 0.0],
+                    color: [0.0, 0.0, 1.0],
+                },
+                Vertex {
+                    position: [0.0, 0.0, axis_length],
+                    color: [0.0, 0.0, 1.0],
+                },
+            ]
+        };
         let axis_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Axis Vertex Buffer"),
             contents: bytemuck::cast_slice(&axis_vertices),
@@ -267,8 +225,46 @@ impl Renderer {
         let axis_vertex_count = axis_vertices.len() as u32;
 
         // Create target disc vertices and buffer
-        let disc_radius = 0.5; // Disc radius is 0.5m
-        let target_disc_vertices = create_target_disc_vertices(disc_radius, 4);
+        let target_disc_vertices = {
+            let disc_radius = 0.5;
+            let segments = 4;
+            let mut vertices = Vec::new();
+            let center = [0.0, 0.0, 0.0];
+            let color = [0.0, 0.0, 8.0]; // Blue color for the target disc
+
+            // Create disc as a series of lines from center to edge points
+            for i in 0..segments {
+                let angle = 2.0 * std::f32::consts::PI * i as f32 / segments as f32;
+                let x = disc_radius * angle.cos();
+                let y = disc_radius * angle.sin();
+
+                // Line from center to edge
+                vertices.push(Vertex {
+                    position: center,
+                    color,
+                });
+                vertices.push(Vertex {
+                    position: [x, y, 0.0],
+                    color,
+                });
+
+                // Line to next point (creating the outer ring)
+                let next_angle = 2.0 * std::f32::consts::PI * ((i + 1) % segments) as f32 / segments as f32;
+                let next_x = disc_radius * next_angle.cos();
+                let next_y = disc_radius * next_angle.sin();
+
+                vertices.push(Vertex {
+                    position: [x, y, 0.0],
+                    color,
+                });
+                vertices.push(Vertex {
+                    position: [next_x, next_y, 0.0],
+                    color,
+                });
+            }
+
+            vertices
+        };
         let target_disc_vertex_buffer =
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Target Disc Vertex Buffer"),
@@ -277,7 +273,6 @@ impl Renderer {
             });
         let target_disc_vertex_count = target_disc_vertices.len() as u32;
 
-        // Create render pipeline
         let render_pipeline =
             Self::create_render_pipeline(&device, &config, &camera_bind_group_layout);
         let line_render_pipeline =
@@ -313,29 +308,6 @@ impl Renderer {
         }
     }
 
-    fn update_target_disc(&mut self) {
-        // Transform the disc vertices to the current target position
-        let target_pos = self.camera_controller.target;
-        let mut transformed_vertices = Vec::new();
-
-        for vertex in &self.target_disc_vertices {
-            let mut new_vertex = *vertex;
-            // Translate the disc to the target position
-            new_vertex.position[0] += target_pos.x;
-            new_vertex.position[1] += target_pos.y;
-            new_vertex.position[2] += target_pos.z;
-            transformed_vertices.push(new_vertex);
-        }
-
-        // Update the buffer with the new positions
-        self.queue.write_buffer(
-            &self.target_disc_vertex_buffer,
-            0,
-            bytemuck::cast_slice(&transformed_vertices),
-        );
-    }
-
-    // WGPU Initialization
     async fn init_wgpu(
         window: std::sync::Arc<Window>,
         size: winit::dpi::PhysicalSize<u32>,
@@ -613,8 +585,8 @@ impl Renderer {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
 
-            // Calculate aspect ratio based on drawable area (excluding fixed 250px panel)
-            const FIXED_PANEL_WIDTH: f32 = 250.0;
+            // Calculate aspect ratio based on drawable area (excluding fixed GUI panel)
+            const FIXED_PANEL_WIDTH: f32 = GUI_WIDTH;
             let drawable_width = new_size.width as f32 - FIXED_PANEL_WIDTH;
             let drawable_height = new_size.height as f32;
             let drawable_aspect = drawable_width / drawable_height;
@@ -649,7 +621,28 @@ impl Renderer {
 
         self.update_fps_counter(dt);
         self.camera_controller.update(&mut self.camera);
-        self.update_target_disc();
+        {
+            let this = &mut *self;
+            // Transform the disc vertices to the current target position
+            let target_pos = this.camera_controller.target;
+            let mut transformed_vertices = Vec::new();
+
+            for vertex in &this.target_disc_vertices {
+                let mut new_vertex = *vertex;
+                // Translate the disc to the target position
+                new_vertex.position[0] += target_pos.x;
+                new_vertex.position[1] += target_pos.y;
+                new_vertex.position[2] += target_pos.z;
+                transformed_vertices.push(new_vertex);
+            }
+
+            // Update the buffer with the new positions
+            this.queue.write_buffer(
+                &this.target_disc_vertex_buffer,
+                0,
+                bytemuck::cast_slice(&transformed_vertices),
+            );
+        };
         self.vp_mat = self.camera.get_vp_matrix().to_cols_array_2d();
         self.queue
             .write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.vp_mat]));
@@ -815,7 +808,7 @@ impl Renderer {
                 timestamp_writes: None,
             });
 
-            // Use transmute to work around lifetime issues (unsafe but necessary)
+            // Use transmute to work around lifetime issues (unsafe)
             let render_pass_static: &mut wgpu::RenderPass<'static> =
                 unsafe { std::mem::transmute(&mut render_pass) };
 
