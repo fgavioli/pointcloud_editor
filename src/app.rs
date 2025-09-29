@@ -74,11 +74,6 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
-        // egui event handler
-        if let (Some(ref mut egui_state), Some(ref window)) = (&mut self.egui_state, &self.window) {
-            let _ = egui_state.on_window_event(window.as_ref(), &event);
-        }
-
         // update
         if self.reload_vertices {
             if let Some(ref mut renderer) = self.renderer {
