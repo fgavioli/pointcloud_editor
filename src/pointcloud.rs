@@ -1,8 +1,27 @@
 /// Point cloud loading, processing and utilities
 
 use glam::{Mat3, Quat, Vec3};
-use pcd_rs::DynReader;
+use pcd_rs::{writer::{Writer, WriterInit}, DataKind, DynReader, PcdSerialize};
 use std::io::Write;
+
+#[derive(Clone)]
+pub struct PointCloud {
+    pub points: Vec<glam::Vec3>,
+    pub intensity: Vec<u8>,
+    pub min_coord: glam::Vec3,
+    pub max_coord: glam::Vec3,
+    pub size: glam::Vec3, // 3D size (extent) of the point cloud
+    pub min_intensity: u8,
+    pub max_intensity: u8,
+}
+
+#[derive(Debug, PcdSerialize)]
+struct ExportPoint {
+    x: f32,
+    y: f32,
+    z: f32,
+    intensity: f32,
+}
 
 // Fit a plane to the input cloud via PCA
 pub fn planefit_pca(points: &[Vec3]) -> Quat {
@@ -47,6 +66,7 @@ pub fn planefit_pca(points: &[Vec3]) -> Quat {
     rot
 }
 
+/// Align the point cloud such that the ground plane is orthogonal to the Z axis.
 pub fn align_to_ground(
     pointcloud: &PointCloud,
     ground_point: glam::Vec3,
@@ -94,7 +114,6 @@ pub fn align_to_ground(
     }
 }
 
-
 /// Find the closest point in the point cloud to a ray
 pub fn find_closest_point_to_ray(
     pointcloud: &PointCloud,
@@ -126,19 +145,8 @@ pub fn find_closest_point_to_ray(
     closest_point
 }
 
-
-#[derive(Clone)]
-pub struct PointCloud {
-    pub points: Vec<glam::Vec3>,
-    pub intensity: Vec<u8>,
-    pub min_coord: glam::Vec3,
-    pub max_coord: glam::Vec3,
-    pub size: glam::Vec3, // 3D size (extent) of the point cloud
-    pub min_intensity: u8,
-    pub max_intensity: u8,
-}
-
-pub fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
+/// Load a PCD file into a PointCloud
+pub fn load_pcd_streaming(filename: &str, progress: bool) -> Option<PointCloud> {
     let start = std::time::Instant::now();
     let reader = match DynReader::open(filename).ok() {
         Some(r) => r,
@@ -209,13 +217,15 @@ pub fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         schema.iter().map(|f| f.name.clone()).collect::<Vec<_>>()
     );
 
-    // Print initial progress bar
-    print!("Loading: [");
-    for _ in 0..25 {
-        print!(" ");
+    if progress {
+        // Print initial progress bar
+        print!("Loading: [");
+        for _ in 0..25 {
+            print!(" ");
+        }
+        print!("] 0%\r");
+        std::io::stdout().flush().unwrap();
     }
-    print!("] 0%\r");
-    std::io::stdout().flush().unwrap();
 
     for record in reader {
         // Access by index~
@@ -267,37 +277,41 @@ pub fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
         }
 
         // Update progress tracking
-        points_loaded += 1;
+        if progress {
+            points_loaded += 1;
 
-        // Update progress bar periodically
-        if points_loaded % update_interval == 0 || last_progress_update.elapsed().as_millis() > 100
-        {
-            let progress_percent = ((points_loaded as f64 / total_points as f64) * 100.0) as usize;
-            let progress_percent = progress_percent.min(100);
-            let filled_bars = (progress_percent * 25) / 100;
+            // Update progress bar periodically
+            if points_loaded % update_interval == 0 || last_progress_update.elapsed().as_millis() > 100
+            {
+                let progress_percent = ((points_loaded as f64 / total_points as f64) * 100.0) as usize;
+                let progress_percent = progress_percent.min(100);
+                let filled_bars = (progress_percent * 25) / 100;
 
-            print!("Loading : [");
-            for i in 0..25 {
-                if i < filled_bars {
-                    print!("=");
-                } else if i == filled_bars {
-                    print!(">");
-                } else {
-                    print!(" ");
+                print!("Loading : [");
+                for i in 0..25 {
+                    if i < filled_bars {
+                        print!("=");
+                    } else if i == filled_bars {
+                        print!(">");
+                    } else {
+                        print!(" ");
+                    }
                 }
+                print!("] {}% ({} points)\r", progress_percent, points_loaded);
+                std::io::stdout().flush().unwrap();
+                last_progress_update = std::time::Instant::now();
             }
-            print!("] {}% ({} points)\r", progress_percent, points_loaded);
-            std::io::stdout().flush().unwrap();
-            last_progress_update = std::time::Instant::now();
         }
     }
 
     // Clear the progress line
-    print!("\r");
-    for _ in 0..80 {
-        print!(" ");
+    if progress {
+        print!("\r");
+        for _ in 0..25 {
+            print!(" ");
+        }
+        print!("\r");
     }
-    print!("\r");
 
     // Compute bounding box
     pointcloud.min_coord = pointcloud
@@ -340,18 +354,59 @@ pub fn load_pcd_streaming(filename: &str) -> Option<PointCloud> {
     Some(pointcloud)
 }
 
+/// Crop the point cloud to a bounding box
+pub fn crop(pointcloud: &PointCloud, bounds_min: glam::Vec3, bounds_max: glam::Vec3) -> PointCloud {
+    let mut cropped_points = Vec::new();
+    let mut cropped_intensity = Vec::new();
+
+    for (i, &point) in pointcloud.points.iter().enumerate() {
+        if point.x >= bounds_min.x
+            && point.x <= bounds_max.x
+            && point.y >= bounds_min.y
+            && point.y <= bounds_max.y
+            && point.z >= bounds_min.z
+            && point.z <= bounds_max.z
+        {
+            cropped_points.push(point);
+            cropped_intensity.push(pointcloud.intensity[i]);
+        }
+    }
+
+    PointCloud {
+        points: cropped_points,
+        intensity: cropped_intensity,
+        min_coord: bounds_min,
+        max_coord: bounds_max,
+        size: bounds_max - bounds_min,
+        min_intensity: u8::MAX,
+        max_intensity: u8::MIN,
+    }
+}
+
+/// Export PointCloud to a PCD file
 pub fn export_pcd(filename: &str, pointcloud: &PointCloud) -> Option<()> {
-    // /// Export point cloud to PCD file with pcd-rs
-    // let mut file = std::fs::File::create(filename).ok()?;
-    // let header = pcd_rs::Header {
-    //     version: Some("0.7".to_string()),
-    //     fields: vec![
-    //         pcd_rs::FieldDef {name:"x".to_string(),datatype:pcd_rs::Datatype::F32,count:1, kind: todo!() },
-    //         pcd_rs::FieldDef { name: "y".to_string(), datatype: pcd_rs::Datatype::F32, count: 1 },
-    //         pcd_rs::FieldDef { name: "z".to_string(), datatype: pcd_rs::Datatype::F32, count: 1 },
-    //         pcd_rs::FieldDef { name: "intensity".to_string(), datatype: pcd_rs::Datatype::F32, count: 1 },
-    //     ],
-    // };
-    // pcd_rs::write_pcd(&mut file, &header, pointcloud).ok()?;
-    Some(())
+    let mut writer: Writer<ExportPoint, _> = WriterInit {
+        height: 1,
+        width: pointcloud.points.len() as u64,
+        viewpoint: Default::default(),
+        data_kind: DataKind::Binary,
+        schema: None,
+    }
+    .create(filename).ok()?;
+
+    // push points
+    pointcloud.points.iter().zip(pointcloud.intensity.iter()).for_each(|(p, &i)| {
+        let point = ExportPoint {
+            x: p.x,
+            y: p.y,
+            z: p.z,
+            // remap intensity to f32
+            intensity: i as f32,
+        };
+        if let Err(e) = writer.push(&point) {
+            eprintln!("Error writing point: {:?}", e);
+        }
+    });
+
+    writer.finish().ok()
 }

@@ -633,8 +633,8 @@ impl Renderer {
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
 
-            // Calculate aspect ratio based on drawable area (excluding fixed 350px panel)
-            const FIXED_PANEL_WIDTH: f32 = 350.0;
+            // Calculate aspect ratio based on drawable area (excluding fixed 250px panel)
+            const FIXED_PANEL_WIDTH: f32 = 250.0;
             let drawable_width = new_size.width as f32 - FIXED_PANEL_WIDTH;
             let drawable_height = new_size.height as f32;
             let drawable_aspect = drawable_width / drawable_height;

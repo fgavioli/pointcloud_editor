@@ -20,7 +20,7 @@ pub struct GuiState {
     pub point_selection_failed: bool,
     // Alignment progress
     pub alignment_in_progress: bool,
-    // Export functionality
+    // Export button
     pub export_pcd_requested: bool,
 }
 
@@ -88,7 +88,7 @@ impl GuiState {
 
     pub fn render(&mut self, ctx: &Context) {
         SidePanel::right("control_panel")
-            .exact_width(350.0)
+            .exact_width(250.0)
             .resizable(false)
             .show(ctx, |ui| {
                 ui.heading("Point Cloud Editor");
@@ -130,16 +130,6 @@ impl GuiState {
                             self.point_selection_mode = false;
                             self.selected_ground_point = None;
                             self.point_selection_failed = false;
-                        }
-                    });
-
-                ui.separator();
-
-                egui::CollapsingHeader::new("Export")
-                    .default_open(true)
-                    .show(ui, |ui| {
-                        if ui.button("Export to PCD").clicked() {
-                            self.export_pcd_requested = true;
                         }
                     });
 
@@ -199,6 +189,16 @@ impl GuiState {
                         if ui.button("Reset crop coordinates").clicked() {
                             self.crop_min = self.pointcloud_min;
                             self.crop_max = self.pointcloud_max;
+                        }
+                    });
+
+                ui.separator();
+
+                egui::CollapsingHeader::new("Export")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        if ui.button("Export to PCD").clicked() {
+                            self.export_pcd_requested = true;
                         }
                     });
 

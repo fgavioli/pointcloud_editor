@@ -11,15 +11,15 @@ mod gui;
 mod pointcloud;
 mod renderer;
 use gui::GuiState;
-use pointcloud::{PointCloud, align_to_ground, find_closest_point_to_ray, load_pcd_streaming};
+use pointcloud::{align_to_ground, find_closest_point_to_ray, load_pcd_streaming, PointCloud};
 use renderer::Renderer;
 
 struct App {
-    original_pointcloud: PointCloud,    // Original point cloud
-    current_pointcloud: PointCloud,     // Currently rendered point cloud
-    renderer: Option<Renderer>,         // Renderer instance
-    window: Option<Arc<Window>>,        // Window instance
-    gui_state: GuiState,                // GUI state
+    original_pointcloud: PointCloud, // Original point cloud
+    current_pointcloud: PointCloud,  // Currently rendered point cloud
+    renderer: Option<Renderer>,      // Renderer instance
+    window: Option<Arc<Window>>,     // Window instance
+    gui_state: GuiState,             // GUI state
     egui_ctx: Option<egui::Context>,
     egui_state: Option<egui_winit::State>,
     egui_renderer: Option<egui_wgpu::Renderer>,
@@ -87,7 +87,6 @@ impl ApplicationHandler for App {
         _window_id: WindowId,
         event: WindowEvent,
     ) {
-
         // egui event handler
         if let (Some(ref mut egui_state), Some(ref window)) = (&mut self.egui_state, &self.window) {
             let _ = egui_state.on_window_event(window.as_ref(), &event);
@@ -283,7 +282,7 @@ impl ApplicationHandler for App {
                             // Handle export PCD requests
                             if self.gui_state.take_export_pcd_request() {
                                 println!("Export PCD requested...");
-                                
+
                                 // Open file dialog to choose save location
                                 if let Some(path) = rfd::FileDialog::new()
                                     .set_title("Save Point Cloud")
@@ -291,11 +290,16 @@ impl ApplicationHandler for App {
                                     .set_file_name("exported_pointcloud.pcd")
                                     .save_file()
                                 {
-                                    println!("Saving point cloud to: {:?}", path);
-                                    
-                                    // Convert path to string and call export function
                                     if let Some(path_str) = path.to_str() {
-                                        if let Some(_) = crate::pointcloud::export_pcd(path_str, &self.current_pointcloud) {
+                                        let cropped_pointcloud = crate::pointcloud::crop(
+                                            &self.current_pointcloud,
+                                            self.gui_state.crop_min,
+                                            self.gui_state.crop_max,
+                                        );
+                                        if let Some(_) = crate::pointcloud::export_pcd(
+                                            path_str,
+                                            &cropped_pointcloud,
+                                        ) {
                                             println!("Point cloud exported successfully!");
                                         } else {
                                             println!("Failed to export point cloud");
@@ -370,17 +374,16 @@ fn main() {
         }
     } else {
         // Default to a sample file if no argument provided
-        filename = "samples/kaist03_000020.pcd".to_string();
+        println!("Usage: pointcloud_editor [path_to_pcd_file]");
+        return;
     }
 
-    let pointcloud = load_pcd_streaming(&filename);
+    let pointcloud = load_pcd_streaming(&filename, true);
     if pointcloud.is_none() {
         println!("Failed to load point cloud");
         return;
     }
     let pointcloud = pointcloud.unwrap();
-
-    println!("Starting renderer...");
     let event_loop = EventLoop::new().unwrap();
     let mut app = App::new(pointcloud);
     event_loop.run_app(&mut app).unwrap();
