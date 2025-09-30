@@ -30,7 +30,7 @@ While ideally this program should be run on a discrete GPU, for smaller pointclo
 ## Installation
 
 ### Release (Recommended)
-Download the latest `.deb` package from [Releases](https://git.hipert.unimore.it/adx/utils/pointcloud_editor/releases):
+Download the latest `.deb` package from [Releases](https://github.com/fgavioli/pointcloud_editor/releases):
 - [Release 1.0](https://drive.google.com/file/d/1TdDt1wy7wOb5hEpOTlSOsO84CarHmyWa/view)
 
 ```bash
