@@ -2,7 +2,7 @@
 Pointcloud editor is a performance-oriented visualizer and editor of large pointcloud (`pcd`) files.
 
 ## Functionalities
-Viz, rotate, crop.
+Visualize, laign, crop and export large pointclouds.
 
 ## Commands
 Pointcloud editor handles camera movements in orbit mode, with commands mapped similarly to `rviz`.
@@ -10,25 +10,16 @@ Pointcloud editor handles camera movements in orbit mode, with commands mapped s
 - **MMB** - *Movement*: To move the target, hold the middle mouse button and move the mouse.
 - **RMB** - *Zoom*: To zoom closer to the target, hold the right mouse button and move the mouse.
 
-## Build
-```bash
-cargo build -r
-```
-
 ## Install
-```bash
-cargo install -r
-```
+Download the `dpkg` package of the latest [release](https://git.hipert.unimore.it/adx/utils/pointcloud_editor/releases).
 
-## Running
-With cargo:
-```bash
-cargo run -r <path_to_pointcloud.pcd>
-```
+Releases
+- [Release 1.0](https://drive.google.com/file/d/1TdDt1wy7wOb5hEpOTlSOsO84CarHmyWa/view)
 
-With the executable:
+## Development
+Clone the repo, `cd` into the directory and to build and run the project, run
 ```bash
-./target/release/pointcloud_editor <path_to_pointcloud.pcd>
+cargo run -r <path_to_pointcloud_file.pcd>
 ```
 
 ## Roadmap
