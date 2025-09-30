@@ -417,7 +417,7 @@ pub fn export_ogrid(path: &str, pointcloud: &PointCloud, resolution: f32) -> Opt
 
     let grid_size_x = (pointcloud.size.x / resolution).ceil() as usize;
     let grid_size_y = (pointcloud.size.y / resolution).ceil() as usize;
-    grid.resize(grid_size_x * grid_size_y, 0u8);
+    grid.resize(grid_size_x * grid_size_y, 255u8);
 
     // fill grid with flattened points
     for &point in &pointcloud.points {
@@ -429,7 +429,7 @@ pub fn export_ogrid(path: &str, pointcloud: &PointCloud, resolution: f32) -> Opt
             && grid_y < grid_size_y as isize
         {
             let index = (grid_y as usize) * grid_size_x + (grid_x as usize);
-            grid[index] = 255u8; // Mark cell as occupied
+            grid[index] = 0u8; // Mark cell as occupied
         }
     }
 
