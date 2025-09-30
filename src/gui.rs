@@ -22,8 +22,10 @@ pub struct GuiState {
     pub point_selection_mode: bool,
     pub point_selection_failed: bool,
 
-    // Export button
+    // Export section
     pub export_pcd_requested: bool,
+    pub export_png_requested: bool,
+    pub png_resolution: f32,
 }
 
 impl GuiState {
@@ -40,6 +42,8 @@ impl GuiState {
             point_selection_mode: false,
             point_selection_failed: false,
             export_pcd_requested: false,
+            export_png_requested: false,
+            png_resolution: 0.05, // Default to 5cm resolution
         }
     }
 
@@ -159,8 +163,26 @@ impl GuiState {
                 egui::CollapsingHeader::new("Export")
                     .default_open(true)
                     .show(ui, |ui| {
-                        if ui.button("Export to PCD").clicked() {
+
+                        ui.separator();
+                        ui.label("Export PCD:");
+                        if ui.button("Export").clicked() {
                             self.export_pcd_requested = true;
+                        }
+
+                        ui.separator();
+
+                        ui.label("Export to Occupancy Grid:");
+                        ui.horizontal(|ui| {
+                            ui.label("Resolution (m):");
+                            ui.add(egui::DragValue::new(&mut self.png_resolution)
+                                .range(0.01..=1.0)
+                                .speed(0.01)
+                                .fixed_decimals(2));
+                        });
+
+                        if ui.button("Export").clicked() {
+                            self.export_png_requested = true;
                         }
                     });
 
@@ -230,5 +252,15 @@ impl GuiState {
         let ret = self.export_pcd_requested.clone();
         self.export_pcd_requested = false;
         ret
+    }
+
+    /// Check if export PNG was requested and reset the flag, returning resolution too
+    pub fn try_consume_export_png(&mut self) -> Option<f32> {
+        if self.export_png_requested {
+            self.export_png_requested = false;
+            Some(self.png_resolution)
+        } else {
+            None
+        }
     }
 }

@@ -750,7 +750,6 @@ impl Renderer {
             self.render_scene(&mut render_pass);
         }
 
-        // Process egui textures (but skip rendering for now)
         for (id, image_delta) in &full_output.textures_delta.set {
             egui_renderer.update_texture(&self.device, &self.queue, *id, image_delta);
         }
@@ -771,8 +770,6 @@ impl Renderer {
             &primitives,
             &screen_descriptor,
         );
-
-        // Render egui overlay with proper lifetime handling
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("egui Render Pass"),
@@ -789,20 +786,18 @@ impl Renderer {
                 timestamp_writes: None,
             });
 
-            // Use transmute to work around lifetime issues (unsafe)
+            // SAFETY: This is safe because the render pass is dropped at the end of this block
+            // and we don't use the encoder until after that happens
             let render_pass_static: &mut wgpu::RenderPass<'static> =
                 unsafe { std::mem::transmute(&mut render_pass) };
-
             egui_renderer.render(render_pass_static, &primitives, &screen_descriptor);
         }
-
-        let command_buffer = encoder.finish();
 
         for id in &full_output.textures_delta.free {
             egui_renderer.free_texture(id);
         }
 
-        self.queue.submit(std::iter::once(command_buffer));
+        self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 
         Ok(())

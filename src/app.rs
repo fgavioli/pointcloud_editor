@@ -88,27 +88,19 @@ impl App {
                         // Update crop bounds based on GUI state
                         renderer.update_crop_bounds(self.gui_state.crop_min, self.gui_state.crop_max);
 
-                        // Handle reset alignment requests
+                        // Handle alignment reset button
                         if self.gui_state.try_consume_alignment_request() {
-                            println!("Resetting point cloud alignment...");
-                            // Reset to original point cloud
                             self.current_pointcloud = self.original_pointcloud.clone();
-
-                            // Update GUI bounds with the original point cloud
                             (self.gui_state.pointcloud_min, self.gui_state.pointcloud_max) = (
                                 self.current_pointcloud.min_coord,
                                 self.current_pointcloud.max_coord,
                             );
                             self.gui_state.reset_crop();
-
-                            // Mark that we need to update vertex data
                             self.reload_vertices = true;
                         }
 
-                        // Handle export PCD requests
+                        // Handle PCD export requests
                         if self.gui_state.try_consume_export_pcd() {
-                            println!("Export PCD requested...");
-
                             if let Some(path) = rfd::FileDialog::new()
                                 .set_title("Save Point Cloud")
                                 .add_filter("PCD Files", &["pcd"])
@@ -131,6 +123,29 @@ impl App {
                                 }
                             } else {
                                 println!("Export cancelled by user");
+                            }
+                        }
+
+                        // Handle PNG export requests
+                        if let Some(resolution) = self.gui_state.try_consume_export_png() {
+                            if let Some(folder) = rfd::FileDialog::new()
+                                .set_title("Choose Folder for PNG Export")
+                                .pick_folder()
+                            {
+                                if let Some(folder_str) = folder.to_str() {
+                                    let cropped_pointcloud = crate::pointcloud::crop(
+                                        &self.current_pointcloud,
+                                        self.gui_state.crop_min,
+                                        self.gui_state.crop_max,
+                                    );
+                                    if None == crate::pointcloud::export_ogrid(folder_str, &cropped_pointcloud, resolution) {
+                                        println!("Failed to export PNG occupancy grid");
+                                    }
+                                } else {
+                                    println!("Invalid folder path selected");
+                                }
+                            } else {
+                                println!("PNG export cancelled by user");
                             }
                         }
 

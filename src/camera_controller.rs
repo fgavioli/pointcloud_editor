@@ -1,14 +1,13 @@
-use std::f32::consts::PI;
 use crate::gui::GUI_WIDTH;
+use std::f32::consts::PI;
 
-use winit::{
-    event::*,
-};
+use winit::event::*;
 
 use crate::camera::OrbitCamera;
 
 const INITIAL_THETA: f32 = 0.0_f32;
 const INITIAL_PHI: f32 = -(PI - 1e-4) / 2.0;
+const INITIAL_FOV: f32 = 60.0_f32.to_radians();
 
 struct InputState {
     // Mouse states
@@ -51,7 +50,7 @@ pub struct CameraController {
 
 impl CameraController {
     pub fn new(target: glam::Vec3, initial_distance: f32) -> Self {
-        let mut camera = OrbitCamera::new(1.0, 60.0_f32.to_radians(), 0.1, 1000.0);
+        let mut camera = OrbitCamera::new(1.0, INITIAL_FOV, 0.1, 1000.0);
         camera.target = target;
         camera.distance = initial_distance;
         camera.theta = INITIAL_THETA;
@@ -73,7 +72,6 @@ impl CameraController {
 
     // Check if a mouse position is within the 3D render area
     fn is_in_render_area(&self, mouse_pos: glam::Vec2) -> bool {
-
         let render_area_width = self.window_size.x - self.gui_width;
         mouse_pos.x >= 0.0
             && mouse_pos.x < render_area_width
@@ -124,7 +122,7 @@ impl CameraController {
             let delta = new_pos - self.input.last_mouse_pos;
             self.camera.theta -= delta.x * self.sensitivity;
             self.camera.theta = self.camera.theta.rem_euclid(2.0 * PI);
-            
+
             self.camera.phi -= delta.y * self.sensitivity;
             self.camera.phi = self.camera.phi.clamp(
                 -std::f32::consts::FRAC_PI_2 + 1e-4,
@@ -194,23 +192,19 @@ impl CameraController {
         let theta = self.camera.theta;
         let phi = self.camera.phi;
         let right = glam::Vec3::new(-theta.cos(), -theta.sin(), 0.0).normalize();
-        let up = glam::Vec3::new(
-            -phi.sin() * theta.sin(),
-            phi.sin() * theta.cos(),
-            phi.cos(),
-        )
-        .normalize();
+        let up = glam::Vec3::new(-phi.sin() * theta.sin(), phi.sin() * theta.cos(), phi.cos())
+            .normalize();
         CameraVectors { right, up }
     }
 
     pub fn update(&mut self, camera: &mut OrbitCamera) {
         self.camera.distance = self.camera.distance.clamp(0.1, f32::MAX);
-        
+
         camera.update_view(
             self.camera.target,
             self.camera.distance,
             self.camera.theta,
-            self.camera.phi
+            self.camera.phi,
         );
     }
 

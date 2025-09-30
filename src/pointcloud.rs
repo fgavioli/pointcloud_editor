@@ -307,7 +307,7 @@ pub fn load_pcd_streaming(filename: &str, progress: bool) -> Option<PointCloud> 
     // Clear the progress line
     if progress {
         print!("\r");
-        for _ in 0..25 {
+        for _ in 0..50 {
             print!(" ");
         }
         print!("\r");
@@ -409,4 +409,50 @@ pub fn export_pcd(filename: &str, pointcloud: &PointCloud) -> Option<()> {
     });
 
     writer.finish().ok()
+}
+
+pub fn export_ogrid(path: &str, pointcloud: &PointCloud, resolution: f32) -> Option<()> {
+    // Create occupancy grid png file and yaml description
+    let mut grid = Vec::new();
+
+    let grid_size_x = (pointcloud.size.x / resolution).ceil() as usize;
+    let grid_size_y = (pointcloud.size.y / resolution).ceil() as usize;
+    grid.resize(grid_size_x * grid_size_y, 0u8);
+
+    // fill grid with flattened points
+    for &point in &pointcloud.points {
+        let grid_x = ((point.x - pointcloud.min_coord.x) / resolution).floor() as isize;
+        let grid_y = ((pointcloud.max_coord.y - point.y) / resolution).floor() as isize;
+        if grid_x >= 0
+            && grid_x < grid_size_x as isize
+            && grid_y >= 0
+            && grid_y < grid_size_y as isize
+        {
+            let index = (grid_y as usize) * grid_size_x + (grid_x as usize);
+            grid[index] = 255u8; // Mark cell as occupied
+        }
+    }
+
+    // save png file
+    let png_filename = format!("{}/map.png", path);
+    let file = std::fs::File::create(&png_filename).ok()?;
+    let w = std::io::BufWriter::new(file);
+    let encoder = png::Encoder::new(w, grid_size_x as u32, grid_size_y as u32);
+    let mut writer = encoder.write_header().ok()?;
+    writer.write_image_data(&grid).ok()?;
+
+    // save yaml file
+    let yaml_filename = format!("{}/map.yaml", path);
+    let mut yaml_file = std::fs::File::create(&yaml_filename).ok()
+        .and_then(|f| std::io::BufWriter::new(f).into());
+    if let Some(f) = &mut yaml_file {
+        writeln!(f, "image: map.png").ok()?;
+        writeln!(f, "resolution: {}", resolution).ok()?;
+        // Origin corresponds to the bottom-left corner of the image in world coordinates
+        writeln!(f, "origin: [{:.3}, {:.3}, 0.0]", pointcloud.min_coord.x, pointcloud.min_coord.y).ok()?;
+        writeln!(f, "negate: 0").ok()?;
+        writeln!(f, "occupied_thresh: 0.65").ok()?;
+        writeln!(f, "free_thresh: 0.196").ok()?;
+    }
+    Some(())
 }
