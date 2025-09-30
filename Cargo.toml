@@ -1,6 +1,6 @@
 [package]
 name = "pointcloud_editor"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 default-run = "pointcloud_editor"
 
@@ -24,3 +24,19 @@ wgpu = "25.0"
 winit = "0.30"
 rfd = "0.15.4"
 png = "0.18.0"
+
+[package.metadata.deb]
+maintainer = "Federico Gavioli <f.gavioli97@gmail.com>"
+copyright = "2025, Federico Gavioli <f.gavioli97@gmail.com>"
+license-file = ["LICENSE.md", "4"]
+extended-description = """\
+Simple but performant point cloud viewer and editor."""
+depends = "$auto"
+section = "utility"
+assets = [
+    # target/release path is special, and gets replaced by cargo-deb with the actual target dir path.
+    ["target/release/pointcloud_editor", "usr/bin/", "755"],
+    # both array and object syntaxes are equivalent:
+    { source = "README.md", dest = "usr/share/doc/cargo-deb/README", mode = "644"},
+]
+# assets = ["$auto"] # the default if assets are not specified
