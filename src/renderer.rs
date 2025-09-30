@@ -786,8 +786,7 @@ impl Renderer {
                 timestamp_writes: None,
             });
 
-            // SAFETY: This is safe because the render pass is dropped at the end of this block
-            // and we don't use the encoder until after that happens
+            // This should be safe as the render pass is dropped at the end of the block
             let render_pass_static: &mut wgpu::RenderPass<'static> =
                 unsafe { std::mem::transmute(&mut render_pass) };
             egui_renderer.render(render_pass_static, &primitives, &screen_descriptor);

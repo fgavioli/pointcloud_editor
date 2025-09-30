@@ -65,6 +65,7 @@ impl GuiState {
                 ui.separator();
 
                 ui.collapsing("Display", |ui| {
+                    ui.separator();
                     ui.checkbox(&mut self.show_axes, "Show Coordinate Axes");
                     ui.checkbox(&mut self.show_target_disc, "Show Target Position");
                 });
@@ -74,6 +75,7 @@ impl GuiState {
                 egui::CollapsingHeader::new("Ground plane alignment")
                     .default_open(true)
                     .show(ui, |ui| {
+                        ui.separator();
                         if self.point_selection_mode {
                             ui.colored_label(
                                 egui::Color32::YELLOW,
@@ -104,6 +106,7 @@ impl GuiState {
                 egui::CollapsingHeader::new("Cropping")
                     .default_open(true)
                     .show(ui, |ui| {
+                        ui.separator();
                         ui.label("X Axis:");
                         ui.add(
                             egui::Slider::new(
@@ -226,9 +229,9 @@ impl GuiState {
                     ui.separator();
 
                     [
-                        "• Left Mouse: Orbit camera",
-                        "• Right Mouse / Mouse Wheel: Zoom",
-                        "• Middle Mouse: Move target",
+                        "• LMB: Orbit camera",
+                        "• RMB / Mouse Wheel: Zoom",
+                        "• Shift+LMB or MMB: Move target",
                     ]
                     .iter()
                     .for_each(|&control| {

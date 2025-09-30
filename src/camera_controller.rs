@@ -2,6 +2,7 @@ use crate::gui::GUI_WIDTH;
 use std::f32::consts::PI;
 
 use winit::event::*;
+use winit::keyboard::{Key, NamedKey};
 
 use crate::camera::OrbitCamera;
 
@@ -18,6 +19,9 @@ struct InputState {
 
     // Track if mouse interaction started in render area
     mouse_started_in_render_area: bool,
+
+    // Modifier key states
+    is_shift_pressed: bool,
 }
 
 impl Default for InputState {
@@ -28,6 +32,7 @@ impl Default for InputState {
             is_middle_mouse_pressed: false,
             last_mouse_pos: glam::Vec2::ZERO,
             mouse_started_in_render_area: false,
+            is_shift_pressed: false,
         }
     }
 }
@@ -110,56 +115,56 @@ impl CameraController {
         }
     }
 
-    fn handle_cursor_moved(&mut self, new_pos: glam::Vec2) -> bool {
+    fn handle_cursor_moved(&mut self, cursor_pos: glam::Vec2) -> bool {
         // Only process mouse movement if the interaction started in the render area
         if !self.input.mouse_started_in_render_area {
-            self.input.last_mouse_pos = new_pos;
+            self.input.last_mouse_pos = cursor_pos;
             return false;
         }
 
         if self.input.is_mouse_pressed {
-            // Left mouse: orbit camera around target
-            let delta = new_pos - self.input.last_mouse_pos;
-            self.camera.theta -= delta.x * self.sensitivity;
-            self.camera.theta = self.camera.theta.rem_euclid(2.0 * PI);
+            // Check if shift is pressed for target panning with left mouse
+            if self.input.is_shift_pressed {
+                self.move_target(cursor_pos);
+                true
+            } else {
+                // Left mouse: orbit camera around target
+                let delta = cursor_pos - self.input.last_mouse_pos;
+                self.camera.theta -= delta.x * self.sensitivity;
+                self.camera.theta = self.camera.theta.rem_euclid(2.0 * PI);
 
-            self.camera.phi -= delta.y * self.sensitivity;
-            self.camera.phi = self.camera.phi.clamp(
-                -std::f32::consts::FRAC_PI_2 + 1e-4,
-                std::f32::consts::FRAC_PI_2 - 1e-4,
-            );
-            self.input.last_mouse_pos = new_pos;
-            true
+                self.camera.phi -= delta.y * self.sensitivity;
+                self.camera.phi = self.camera.phi.clamp(
+                    -std::f32::consts::FRAC_PI_2 + 1e-4,
+                    std::f32::consts::FRAC_PI_2 - 1e-4,
+                );
+                self.input.last_mouse_pos = cursor_pos;
+                true
+            }
         } else if self.input.is_right_mouse_pressed {
             // Right mouse: zoom in/out
-            let delta = new_pos - self.input.last_mouse_pos;
+            let delta = cursor_pos - self.input.last_mouse_pos;
             let zoom_amount = -delta.y * self.sensitivity * self.camera.distance * 0.5;
             self.camera.distance = (self.camera.distance + zoom_amount).clamp(0.1, f32::MAX);
-            self.input.last_mouse_pos = new_pos;
+            self.input.last_mouse_pos = cursor_pos;
             true
         } else if self.input.is_middle_mouse_pressed {
-            // Middle mouse: pan target (RViz-style)
-            let delta = new_pos - self.input.last_mouse_pos;
-
-            // Calculate camera vectors for target panning
-            let camera_vectors = self.calculate_camera_vectors();
-
-            // Scale the panning based on distance (closer = smaller movements, farther = larger movements)
-            let pan_scale = self.camera.distance * 0.001;
-
-            // Move target:
-            // - Mouse right = view pans right (target moves left relative to camera)
-            // - Mouse up = view pans up (target moves down relative to camera)
-            let right_movement = camera_vectors.right * (-delta.x * pan_scale);
-            let up_movement = camera_vectors.up * (delta.y * pan_scale);
-
-            self.camera.target += right_movement + up_movement;
-            self.input.last_mouse_pos = new_pos;
+            self.move_target(cursor_pos);
             true
         } else {
-            self.input.last_mouse_pos = new_pos;
+            self.input.last_mouse_pos = cursor_pos;
             false
         }
+    }
+
+    fn move_target(&mut self, cursor_pos: glam::Vec2) {
+        // Middle mouse: pan target (RViz-style)
+        let delta = cursor_pos - self.input.last_mouse_pos;
+        let camera_vectors = self.calculate_camera_vectors();
+        let pan_scale = self.camera.distance * self.sensitivity;
+        self.camera.target += camera_vectors.right * (-delta.x * pan_scale)
+            + camera_vectors.up * (delta.y * pan_scale);
+        self.input.last_mouse_pos = cursor_pos;
     }
 
     fn handle_mouse_wheel(&mut self, delta: &MouseScrollDelta) {
@@ -184,8 +189,18 @@ impl CameraController {
                 self.handle_mouse_wheel(delta);
                 true
             }
+            WindowEvent::KeyboardInput { event, .. } => self.handle_keyboard_input(event),
             _ => false,
         }
+    }
+
+    fn handle_keyboard_input(&mut self, event: &KeyEvent) -> bool {
+        // Track shift key state
+        if let Key::Named(NamedKey::Shift) = event.logical_key {
+            self.input.is_shift_pressed = event.state == ElementState::Pressed;
+            return false; // Don't consume the event, let others handle it too
+        }
+        false
     }
 
     fn calculate_camera_vectors(&self) -> CameraVectors {
