@@ -1,7 +1,6 @@
 # Point Cloud Editor
 ![Point Cloud Editor](https://img.shields.io/badge/language-Rust-orange.svg)
 ![License](https://img.shields.io/badge/license-Apache2-blue.svg)
-![Version](https://img.shields.io/badge/version-1.0.2-green.svg)
 
 A performance-focused, Rust-based 3D point cloud visualizer and editor for processing large PCD files. Inspired by `pcl_viewer` and extended with point cloud editing tools.
 
