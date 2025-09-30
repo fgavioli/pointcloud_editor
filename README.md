@@ -1,42 +1,89 @@
-# Pointcloud Editor
-Pointcloud editor is a performance-oriented visualizer and editor of large pointcloud (`pcd`) files.
+# Point Cloud Editor
+![Point Cloud Editor](https://img.shields.io/badge/language-Rust-orange.svg)
+![License](https://img.shields.io/badge/license-Apache2-blue.svg)
+![Version](https://img.shields.io/badge/version-1.0.0-green.svg)
 
-## Functionalities
-Visualize, laign, crop and export large pointclouds.
+A performance-focused, Rust-based 3D point cloud visualizer and editor for processing large PCD files. Inspired by `pcl_viewer` and extended to enable point cloud editing capabilities.
 
-## Commands
-Pointcloud editor handles camera movements in orbit mode, with commands mapped similarly to `rviz`.
-- **LMB** - *Orbit*: To orbit around the target, hold the left mouse button and move the mouse.
-- **MMB** - *Movement*: To move the target, hold the middle mouse button and move the mouse.
-- **RMB** - *Zoom*: To zoom closer to the target, hold the right mouse button and move the mouse.
+### **Visualizer**
+- Orbit-based 3D point cloud visualization.
 
-## Install
-Download the `dpkg` package of the latest [release](https://git.hipert.unimore.it/adx/utils/pointcloud_editor/releases).
+### **Point Cloud Processing**
+- PCA-based ground plane alignment
+- 3D bounding box cropping
 
-Releases
+### **Export**
+- **PCD export** - Save processed point clouds in PCD format
+- **PNG/YAML export** - Export flattened occupancy grid as ROS-compatible map files
+
+### **Camera Controls**
+- **Left Mouse Button (LMB)** - Orbit around target
+- **Middle Mouse Button (MMB)** or **Shift + LMB** - Move target position
+- **Right Mouse Button (RMB)** or **Mouse Wheel** - Zoom in/out
+
+## Prerequisites
+- Rust 1.70+
+- OpenGL support
+
+## Installation
+
+
+### From Release (Recommended)
+Download the latest `.deb` package from [Releases](https://git.hipert.unimore.it/adx/utils/pointcloud_editor/releases):
 - [Release 1.0](https://drive.google.com/file/d/1TdDt1wy7wOb5hEpOTlSOsO84CarHmyWa/view)
 
-## Development
-Clone the repo, `cd` into the directory and to build and run the project, run
 ```bash
-cargo run -r <path_to_pointcloud_file.pcd>
+# On Ubuntu/Debian
+sudo dpkg -i pointcloud_editor_1.0.0_amd64.deb
 ```
 
-## Roadmap
-Future features wishlist
-- [ ] Display
-  - [ ] Point color alternatives (intensity, axis color, etc...)
-- [ ] Post-processing
-  - [ ] Voxel filtering
-  - [ ] Farthest point sampling
-  - [ ] Isolated points removal
-  - [ ] Sharpening
-- [ ] Segmentation
-  - [ ] Possibly color points based on segmentation results
-- [ ] PNG export post-processing
-  - [ ] Denoising
+### From sources
+```bash
+# Clone the repository
+git clone https://git.hipert.unimore.it/adx/utils/pointcloud_editor.git
+cd pointcloud_editor
 
+# Build and run in release mode
+cargo run --release -- path/to/your/pointcloud.pcd
+```
+
+### Usage
+
+```bash
+# Run with a PCD file
+pointcloud_editor samples/outdoor.pcd
+
+# Or if built from source
+cargo run --release -- samples/outdoor.pcd
+```
+## Roadmap
+
+### **Display**
+- [ ] Multiple color schemes (height-based, custom palettes)
+- [ ] Point size adjustment
+- [ ] Transparency controls
+- [ ] Measurement tools (distance, area, volume)
+
+### **Processing**
+- [ ] Voxel grid downsampling
+- [ ] Farthest point sampling
+- [ ] Outlier removal algorithms
+- [ ] Point cloud sharpening
+
+### **Analysis**
+- [ ] Color-coded segmentation display
+- [ ] Surface reconstruction
+
+### **Export**
+- [ ] 3D format exports (PLY, OBJ)
+- [ ] Occupancy grid post-processing
+
+## Contributing
+Contributions are welcome! Please feel free to submit pull requests or open issues for bug reports and feature requests.
+
+## License
+
+This project is licensed under the Apache2 License - see [LICENSE](LICENSE.md) for details.
 
 ## Authors
 * **Federico Gavioli** - [fgavioli](https://github.com/fgavioli) - _(Maintainer)_
-
