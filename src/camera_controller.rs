@@ -161,7 +161,7 @@ impl CameraController {
         // Middle mouse: pan target (RViz-style)
         let delta = cursor_pos - self.input.last_mouse_pos;
         let camera_vectors = self.calculate_camera_vectors();
-        let pan_scale = self.camera.distance * self.sensitivity;
+        let pan_scale = self.camera.distance * self.sensitivity * 0.25;
         self.camera.target += camera_vectors.right * (-delta.x * pan_scale)
             + camera_vectors.up * (delta.y * pan_scale);
         self.input.last_mouse_pos = cursor_pos;

@@ -1,7 +1,7 @@
 # Point Cloud Editor
 ![Point Cloud Editor](https://img.shields.io/badge/language-Rust-orange.svg)
 ![License](https://img.shields.io/badge/license-Apache2-blue.svg)
-![Version](https://img.shields.io/badge/version-1.0.0-green.svg)
+![Version](https://img.shields.io/badge/version-1.0.2-green.svg)
 
 A performance-focused, Rust-based 3D point cloud visualizer and editor for processing large PCD files. Inspired by `pcl_viewer` and extended with point cloud editing tools.
 
@@ -22,6 +22,8 @@ A performance-focused, Rust-based 3D point cloud visualizer and editor for proce
 - **Right Mouse Button (RMB)** or **Mouse Wheel** - Zoom in/out
 
 ## Prerequisites
+`pointcloud_editor` is developed and tested on Ubuntu 22.04.
+
 - Rust 1.70+
 - WGSL-capable hardware
 
@@ -31,7 +33,7 @@ While ideally this program should be run on a discrete GPU, for smaller pointclo
 
 ### Release (Recommended)
 Download the latest `.deb` package from [Releases](https://github.com/fgavioli/pointcloud_editor/releases):
-- [Release 1.0](https://drive.google.com/file/d/1TdDt1wy7wOb5hEpOTlSOsO84CarHmyWa/view)
+- [Release 1.0.3](https://drive.google.com/file/d/1vSsHID7n8GHXUrBNMtfjsjjupHmlcnb0/view?usp=sharing)
 
 ```bash
 # On Ubuntu/Debian
