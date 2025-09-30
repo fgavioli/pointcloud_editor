@@ -23,7 +23,7 @@ A performance-focused, Rust-based 3D point cloud visualizer and editor for proce
 
 ## Prerequisites
 - Rust 1.70+
-- OpenGL-capable hardware
+- WGSL-capable hardware
 
 While ideally this program should be run on a discrete GPU, for smaller pointclouds a laptop integrated GPU is perfectly capable of running `pointcloud_editor` at 60+ FPS.
 
