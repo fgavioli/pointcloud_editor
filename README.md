@@ -5,30 +5,31 @@
 
 A performance-focused, Rust-based 3D point cloud visualizer and editor for processing large PCD files. Inspired by `pcl_viewer` and extended to enable point cloud editing capabilities.
 
-### **Visualizer**
+**Visualizer:**
 - Orbit-based 3D point cloud visualization.
 
-### **Point Cloud Processing**
+**Point Cloud Processing:**
 - PCA-based ground plane alignment
 - 3D bounding box cropping
 
-### **Export**
-- **PCD export** - Save processed point clouds in PCD format
+**Export:**
+- **PCD export** - Save processed point clouds into `.pcd` files
 - **PNG/YAML export** - Export flattened occupancy grid as ROS-compatible map files
 
-### **Camera Controls**
+## **Camera Controls**
 - **Left Mouse Button (LMB)** - Orbit around target
 - **Middle Mouse Button (MMB)** or **Shift + LMB** - Move target position
 - **Right Mouse Button (RMB)** or **Mouse Wheel** - Zoom in/out
 
 ## Prerequisites
 - Rust 1.70+
-- OpenGL support
+- OpenGL-capable hardware
+
+While ideally this program should be run on a discrete GPU, for smaller pointclouds a laptop integrated GPU is perfectly capable of running `pointcloud_editor` at 60+ FPS.
 
 ## Installation
 
-
-### From Release (Recommended)
+### Release (Recommended)
 Download the latest `.deb` package from [Releases](https://git.hipert.unimore.it/adx/utils/pointcloud_editor/releases):
 - [Release 1.0](https://drive.google.com/file/d/1TdDt1wy7wOb5hEpOTlSOsO84CarHmyWa/view)
 
