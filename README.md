@@ -36,7 +36,7 @@ Download the latest `.deb` package from [Releases](https://github.com/fgavioli/p
 
 ```bash
 # On Ubuntu/Debian
-sudo dpkg -i pointcloud_editor_1.0.0_amd64.deb
+sudo dpkg -i pointcloud-editor_1.0.3_amd64.deb
 ```
 
 ### From sources
