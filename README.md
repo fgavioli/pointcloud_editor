@@ -31,12 +31,11 @@ While ideally this program should be run on a discrete GPU, for smaller pointclo
 ## Installation
 
 ### Release (Recommended)
-Download the latest `.deb` package from [Releases](https://github.com/fgavioli/pointcloud_editor/releases):
-- [Release 1.0.3](https://drive.google.com/file/d/1vSsHID7n8GHXUrBNMtfjsjjupHmlcnb0/view?usp=sharing)
+Download the latest `.deb` package from the [Releases](https://github.com/fgavioli/pointcloud_editor/releases) page.
 
 ```bash
 # On Ubuntu/Debian
-sudo dpkg -i pointcloud-editor_1.0.3_amd64.deb
+sudo dpkg -i pointcloud-editor_1.0.4_amd64.deb
 ```
 
 ### From sources
