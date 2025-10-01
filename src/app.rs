@@ -48,16 +48,7 @@ impl App {
     fn handle_events(&mut self, event: WindowEvent, event_loop: &ActiveEventLoop) {
         let renderer = self.renderer.as_mut().unwrap();
         match event {
-            WindowEvent::CloseRequested
-            | WindowEvent::KeyboardInput {
-                event:
-                    KeyEvent {
-                        logical_key: winit::keyboard::Key::Named(winit::keyboard::NamedKey::Escape),
-                        state: ElementState::Pressed,
-                        ..
-                    },
-                ..
-            } => event_loop.exit(),
+            WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(physical_size) => {
                 renderer.resize(physical_size);
             }
