@@ -59,23 +59,23 @@ cargo run --release -- samples/outdoor.pcd
 ```
 ## Roadmap
 
-### **Display**
+**Display**
 - [ ] Multiple color schemes (height-based, custom palettes)
 - [ ] Point size adjustment
 - [ ] Transparency controls
 - [ ] Measurement tools (distance, area, volume)
 
-### **Processing**
+**Processing**
 - [ ] Voxel grid downsampling
 - [ ] Farthest point sampling
 - [ ] Outlier removal algorithms
 - [ ] Point cloud sharpening
 
-### **Analysis**
+**Analysis**
 - [ ] Color-coded segmentation display
 - [ ] Surface reconstruction
 
-### **Export**
+**Export**
 - [ ] 3D format exports (PLY, OBJ)
 - [ ] Occupancy grid post-processing
 
