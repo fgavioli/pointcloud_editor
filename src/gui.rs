@@ -26,6 +26,13 @@ pub struct GuiState {
     pub export_pcd_requested: bool,
     pub export_png_requested: bool,
     pub png_resolution: f32,
+
+    // Voxel downsampling
+    pub voxel_size: f32,
+    pub downsample_requested: bool,
+
+    // Point count info
+    pub point_count: usize,
 }
 
 impl GuiState {
@@ -44,6 +51,9 @@ impl GuiState {
             export_pcd_requested: false,
             export_png_requested: false,
             png_resolution: 0.05, // Default to 5cm resolution
+            voxel_size: 0.1, // Default to 10cm voxel size
+            downsample_requested: false,
+            point_count: 0,
         }
     }
 
@@ -163,6 +173,25 @@ impl GuiState {
 
                 ui.separator();
 
+                egui::CollapsingHeader::new("Downsampling")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.separator();
+                        ui.label("Voxel Downsampling:");
+                        ui.horizontal(|ui| {
+                            ui.label("Voxel size (m):");
+                            ui.add(egui::DragValue::new(&mut self.voxel_size)
+                                .range(0.01..=1.0)
+                                .speed(0.01)
+                                .fixed_decimals(2));
+                        });
+                        if ui.button("Apply Downsampling").clicked() {
+                            self.downsample_requested = true;
+                        }
+                    });
+
+                ui.separator();
+
                 egui::CollapsingHeader::new("Export")
                     .default_open(true)
                     .show(ui, |ui| {
@@ -228,6 +257,13 @@ impl GuiState {
                     ui.label("Camera Info:");
                     ui.separator();
 
+                    ui.horizontal(|ui| {
+                        ui.label("Points:");
+                        ui.label(format!("{}", self.point_count));
+                    });
+                    ui.label("Point Cloud Info:");
+                    ui.separator();
+
                     [
                         "• LMB: Orbit camera",
                         "• RMB / Mouse Wheel: Zoom",
@@ -262,6 +298,16 @@ impl GuiState {
         if self.export_png_requested {
             self.export_png_requested = false;
             Some(self.png_resolution)
+        } else {
+            None
+        }
+    }
+
+    /// Check if downsampling was requested and reset the flag, returning voxel size
+    pub fn try_consume_downsample(&mut self) -> Option<f32> {
+        if self.downsample_requested {
+            self.downsample_requested = false;
+            Some(self.voxel_size)
         } else {
             None
         }

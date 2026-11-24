@@ -29,6 +29,7 @@ impl App {
         let mut gui_state = GuiState::new();
         (gui_state.pointcloud_min, gui_state.pointcloud_max) =
             (pointcloud.min_coord, pointcloud.max_coord);
+        gui_state.point_count = pointcloud.points.len();
         gui_state.reset_crop();
 
         Self {
@@ -86,6 +87,22 @@ impl App {
                                 self.current_pointcloud.min_coord,
                                 self.current_pointcloud.max_coord,
                             );
+                            self.gui_state.point_count = self.current_pointcloud.points.len();
+                            self.gui_state.reset_crop();
+                            self.reload_vertices = true;
+                        }
+
+                        // Handle voxel downsampling request
+                        if let Some(voxel_size) = self.gui_state.try_consume_downsample() {
+                            self.current_pointcloud = crate::pointcloud::voxel_downsample(
+                                &self.current_pointcloud,
+                                voxel_size,
+                            );
+                            (self.gui_state.pointcloud_min, self.gui_state.pointcloud_max) = (
+                                self.current_pointcloud.min_coord,
+                                self.current_pointcloud.max_coord,
+                            );
+                            self.gui_state.point_count = self.current_pointcloud.points.len();
                             self.gui_state.reset_crop();
                             self.reload_vertices = true;
                         }

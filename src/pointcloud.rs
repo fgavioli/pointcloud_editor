@@ -456,3 +456,71 @@ pub fn export_ogrid(path: &str, pointcloud: &PointCloud, resolution: f32) -> Opt
     }
     Some(())
 }
+
+/// Voxel downsampling of the point cloud
+/// Groups points into voxels and keeps only one representative point per voxel
+pub fn voxel_downsample(pointcloud: &PointCloud, voxel_size: f32) -> PointCloud {
+    use std::collections::HashMap;
+
+    // Hash function for voxel grid coordinates
+    fn voxel_key(point: glam::Vec3, voxel_size: f32, min_coord: glam::Vec3) -> (i32, i32, i32) {
+        let x = ((point.x - min_coord.x) / voxel_size).floor() as i32;
+        let y = ((point.y - min_coord.y) / voxel_size).floor() as i32;
+        let z = ((point.z - min_coord.z) / voxel_size).floor() as i32;
+        (x, y, z)
+    }
+
+    // Group points by voxel and accumulate for averaging
+    let mut voxel_map: HashMap<(i32, i32, i32), (glam::Vec3, u32, u32)> = HashMap::new();
+
+    for (i, &point) in pointcloud.points.iter().enumerate() {
+        let key = voxel_key(point, voxel_size, pointcloud.min_coord);
+        let intensity = pointcloud.intensity.get(i).copied().unwrap_or(0) as u32;
+        
+        voxel_map
+            .entry(key)
+            .and_modify(|(sum, count, int_sum)| {
+                *sum += point;
+                *count += 1;
+                *int_sum += intensity;
+            })
+            .or_insert((point, 1, intensity));
+    }
+
+    // Create new point cloud with averaged points
+    let mut new_points = Vec::with_capacity(voxel_map.len());
+    let mut new_intensity = Vec::with_capacity(voxel_map.len());
+
+    for (sum, count, int_sum) in voxel_map.values() {
+        let avg_point = *sum / (*count as f32);
+        let avg_intensity = (*int_sum / *count) as u8;
+        new_points.push(avg_point);
+        new_intensity.push(avg_intensity);
+    }
+
+    // Recompute bounds
+    let min_coord = new_points
+        .iter()
+        .fold(glam::Vec3::splat(f32::INFINITY), |min, p| min.min(*p));
+    let max_coord = new_points
+        .iter()
+        .fold(glam::Vec3::splat(f32::NEG_INFINITY), |max, p| max.max(*p));
+    let size = max_coord - min_coord;
+
+    // Recompute intensity range
+    let (min_intensity, max_intensity) = new_intensity
+        .iter()
+        .fold((u8::MAX, u8::MIN), |(min, max), &val| {
+            (min.min(val), max.max(val))
+        });
+
+    PointCloud {
+        points: new_points,
+        intensity: new_intensity,
+        min_coord,
+        max_coord,
+        size,
+        min_intensity,
+        max_intensity,
+    }
+}
